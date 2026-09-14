@@ -60,6 +60,12 @@ interface TeamState {
   formationChanges: number;
   longPasses: number;
   totalPassSequences: number;
+  /**
+   * How well the side has turned up today, drawn once per match. Football is
+   * not decided by ability alone: without this a large quality gap becomes a
+   * mathematical certainty, which no real league is.
+   */
+  dayFactor: number;
 }
 
 function emptyStats(team: EngineTeam): TeamStats {
@@ -115,6 +121,7 @@ function createState(team: EngineTeam): TeamState {
     sequencesWithBall: 0, finalThirdEntries: 0, defensiveActions: 0,
     counterAttackGoals: 0, setPieceGoals: 0, formationChanges: 0,
     longPasses: 0, totalPassSequences: 0,
+    dayFactor: 1,
   };
   refreshRatings(state);
   return state;
@@ -145,10 +152,10 @@ function refreshRatings(state: TeamState): void {
     ratings.defending *= 1 + (HOME_ADVANTAGE - 1) * 0.5;
     ratings.pressing *= 1 + (HOME_ADVANTAGE - 1) * 0.5;
   }
-  // Squad morale nudges everything a little.
+  // Squad morale nudges everything a little, and so does the day itself.
   const moraleFactor = 0.97 + (clamp(state.team.morale, 0, 100) / 100) * 0.06;
   for (const key of ['defending', 'pressing', 'buildUp', 'creation', 'finishing', 'transition'] as const) {
-    ratings[key] *= moraleFactor;
+    ratings[key] *= moraleFactor * state.dayFactor;
   }
   const carried = state.profile as AdjustableProfile | undefined;
   state.ratings = ratings;
@@ -208,6 +215,14 @@ export function simulateMatch(input: MatchInput): MatchResult {
   const rng = createRng(`${input.seed}|${ENGINE_VERSION}`);
   const home = createState(input.home);
   const away = createState(input.away);
+
+  // Each side's level of performance on the day, drawn once and applied to every
+  // rating. A well-drilled, stronger team is still the favourite; it is not a
+  // certainty.
+  home.dayFactor = clamp(rng.normal(1, 0.062), 0.85, 1.15);
+  away.dayFactor = clamp(rng.normal(1, 0.062), 0.85, 1.15);
+  refreshRatings(home);
+  refreshRatings(away);
   const events: EngineEvent[] = [];
   let sequence = 0;
 

@@ -152,7 +152,7 @@ export function analyseTacticalChange(
   add('formation', 'Formation',
     previous ? getFormation(previous.formation).label : '—',
     getFormation(next.formation).label,
-    (formationMoved ? 0.35 + shapeDistance * 0.45 : 0) * unfamiliar(f.formation) + unfamiliar(f.formation) * 0.25,
+    (formationMoved ? 0.45 + shapeDistance * 0.65 : 0) * unfamiliar(f.formation) + unfamiliar(f.formation) * 0.25,
     ['defensiveCompactness', 'positionalQuality', 'transitionReliability']);
 
   add('playingStyle', 'Playing style',
@@ -220,8 +220,10 @@ export function analyseTacticalChange(
     changes.reduce((acc, c) => acc + c.cost, 0) / 2.2 + (simultaneous ? 0.1 : 0),
     0, 1);
 
+  // Calibrated so that rebuilding the back line — 4-3-3 to 3-5-2, say — is a
+  // major change on its own, while a couple of dials is not.
   const magnitude: ChangeMagnitude =
-    score < 0.1 ? 'NONE' : score < 0.24 ? 'MINOR' : score < 0.45 ? 'MODERATE' : 'MAJOR';
+    score < 0.08 ? 'NONE' : score < 0.2 ? 'MINOR' : score < 0.3 ? 'MODERATE' : 'MAJOR';
 
   const warnings: string[] = [];
   if (simultaneous) {
