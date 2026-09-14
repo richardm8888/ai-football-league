@@ -1,0 +1,47 @@
+# Local development stack.
+#
+#   docker compose up -d db     # just the database, run the app with npm run dev
+#   docker compose up           # database and app together
+#
+# The app service is intended for a small private deployment: one container, one
+# database, no orchestration. That is the right size for a league of eight.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aifl
+      POSTGRES_PASSWORD: aifl
+      POSTGRES_DB: aifl
+    ports:
+      - '5432:5432'
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U aifl -d aifl']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://aifl:aifl@db:5432/aifl
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET, e.g. openssl rand -hex 32}
+      AI_PROVIDER: ${AI_PROVIDER:-anthropic}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-claude-sonnet-5}
+      ALLOW_OPEN_REGISTRATION: ${ALLOW_OPEN_REGISTRATION:-0}
+      NODE_ENV: production
+    ports:
+      - '3000:3000'
+    # Migrations run on boot so a deploy is a single command.
+    command: sh -c "npx prisma migrate deploy && node server.js"
+
+volumes:
+  db-data:
