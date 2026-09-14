@@ -1,0 +1,3 @@
+# A private league. Nothing here is meant to be indexed.
+User-agent: *
+Disallow: /
