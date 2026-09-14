@@ -329,6 +329,12 @@ export interface FamiliarityProgressInput {
   playedPlan?: TacticalPlanInput | null;
   startersThisWeek: Array<{ playerId: string; role: PlayerRole; position: Position }>;
   startersLastWeek: string[];
+  /**
+   * Weekly drift is applied once per week. The simulator progresses familiarity
+   * twice — training before the match, then the rehearsal value of actually
+   * playing the system afterwards — so the second call skips the decay.
+   */
+  applyDecay?: boolean;
 }
 
 export interface FamiliarityProgressResult {
@@ -412,6 +418,7 @@ export function progressFamiliarity(input: FamiliarityProgressInput): Familiarit
   const notes: string[] = [];
 
   // 1. Everything the squad is not working on slips a little.
+  if (input.applyDecay !== false) {
   for (const key of Object.keys(f.FORMATION) as Formation[]) f.FORMATION[key] = decay(f.FORMATION[key]!);
   for (const key of Object.keys(f.PLAYING_STYLE) as PlayingStyle[]) f.PLAYING_STYLE[key] = decay(f.PLAYING_STYLE[key]!);
   for (const key of Object.keys(f.PRESSING) as PressingIntensity[]) f.PRESSING[key] = decay(f.PRESSING[key]!);
@@ -420,6 +427,7 @@ export function progressFamiliarity(input: FamiliarityProgressInput): Familiarit
   f.TRANSITION = decay(f.TRANSITION);
   f.SET_PIECES = decay(f.SET_PIECES);
   f.OVERALL_STABILITY = decay(f.OVERALL_STABILITY, 0.8);
+  }
 
   const applyTarget = (target: TrainingTarget, amount: number) => {
     const value = amount * target.weight;

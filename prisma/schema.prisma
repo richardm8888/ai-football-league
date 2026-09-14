@@ -639,6 +639,9 @@ model TrainingPlan {
   primaryFocus    TrainingFocus
   secondaryFocus  TrainingFocus
   intensity       TrainingIntensity @default(NORMAL)
+  /// Shape to rehearse when a focus is FORMATION_FAMILIARITY, which is how a
+  /// manager phases in a new system before committing to it in a match.
+  targetFormation Formation?
   /// [{ playerId, role }] individual role work, validated in the domain layer.
   individualFocus Json              @default("[]")
   status          PlanStatus        @default(DRAFT)
