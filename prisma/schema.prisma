@@ -1,0 +1,995 @@
+// AI Football League — persistence schema.
+//
+// Design notes:
+//  * Every competitive fact lives here: the match engine's inputs, its seed and
+//    version, its outputs, and the plans that produced them. A match is therefore
+//    always reproducible from the database alone.
+//  * Structured tactical/training choices are enums, never free text, so that an
+//    AI proposal can only ever resolve to a value the domain already understands.
+//  * Private manager information (AI conversations, unsubmitted plans, training)
+//    is separated from published reports so visibility rules stay enforceable.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity and league membership
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  displayName  String
+  isSuperAdmin Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  sessions      Session[]
+  memberships   LeagueMembership[]
+  ownedLeagues  League[]           @relation("LeagueOwner")
+  clubs         Club[]
+  conversations AiConversation[]
+  approvals     AiDecision[]       @relation("AiDecisionApprover")
+  auditLogs     AuditLog[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model League {
+  id         String   @id @default(cuid())
+  name       String
+  inviteCode String   @unique
+  ownerId    String
+  createdAt  DateTime @default(now())
+
+  // Fairness: every manager in a league gets the same model and budget.
+  aiModel         String @default("claude-sonnet-5")
+  aiMonthlyTokens Int    @default(400000)
+
+  owner       User               @relation("LeagueOwner", fields: [ownerId], references: [id])
+  memberships LeagueMembership[]
+  clubs       Club[]
+  seasons     Season[]
+  auditLogs   AuditLog[]
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MANAGER
+}
+
+model LeagueMembership {
+  id       String     @id @default(cuid())
+  leagueId String
+  userId   String
+  role     MemberRole @default(MANAGER)
+  joinedAt DateTime   @default(now())
+
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([leagueId, userId])
+}
+
+// ---------------------------------------------------------------------------
+// Competition structure
+// ---------------------------------------------------------------------------
+
+enum SeasonStatus {
+  SCHEDULED
+  ACTIVE
+  COMPLETE
+}
+
+model Season {
+  id        String       @id @default(cuid())
+  leagueId  String
+  name      String
+  status    SeasonStatus @default(ACTIVE)
+  createdAt DateTime     @default(now())
+
+  league    League        @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  matchdays Matchday[]
+  fixtures  Fixture[]
+  history   ClubHistory[]
+  reports   Report[]
+
+  @@unique([leagueId, name])
+}
+
+/// The weekly state machine. A matchday moves forward one phase at a time and
+/// each phase gates which actions the domain services will accept.
+enum MatchdayPhase {
+  WEEK_OPEN
+  ANALYSIS
+  PREPARATION
+  TACTICAL_SUBMISSION
+  REVIEW_AND_APPROVAL
+  LOCKED
+  SIMULATION
+  POST_MATCH
+  COMPLETE
+}
+
+model Matchday {
+  id          String        @id @default(cuid())
+  seasonId    String
+  number      Int
+  phase       MatchdayPhase @default(WEEK_OPEN)
+  deadlineAt  DateTime?
+  simulatedAt DateTime?
+  createdAt   DateTime      @default(now())
+
+  season        Season         @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  fixtures      Fixture[]
+  trainingPlans TrainingPlan[]
+  reports       Report[]
+  aiDecisions   AiDecision[]
+  history       ClubHistory[]
+
+  @@unique([seasonId, number])
+}
+
+enum FixtureStatus {
+  SCHEDULED
+  LOCKED
+  PLAYED
+}
+
+model Fixture {
+  id         String        @id @default(cuid())
+  seasonId   String
+  matchdayId String
+  homeClubId String
+  awayClubId String
+  status     FixtureStatus @default(SCHEDULED)
+
+  season     Season      @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  matchday   Matchday    @relation(fields: [matchdayId], references: [id], onDelete: Cascade)
+  homeClub   Club        @relation("HomeFixtures", fields: [homeClubId], references: [id], onDelete: Cascade)
+  awayClub   Club        @relation("AwayFixtures", fields: [awayClubId], references: [id], onDelete: Cascade)
+  matchPlans MatchPlan[]
+  match      Match?
+  reports    Report[]
+
+  @@unique([matchdayId, homeClubId])
+  @@unique([matchdayId, awayClubId])
+  @@index([seasonId])
+}
+
+// ---------------------------------------------------------------------------
+// Clubs, squads and players
+// ---------------------------------------------------------------------------
+
+model Club {
+  id           String   @id @default(cuid())
+  leagueId     String
+  name         String
+  shortName    String
+  nickname     String?
+  stadium      String
+  primaryColor String   @default("#1f6feb")
+  /// Baseline club strength, 1-100. Used for squad generation and reputation.
+  reputation   Int      @default(60)
+  /// Squad-wide mood, 1-100.
+  morale       Int      @default(60)
+  ownerUserId  String?
+  createdAt    DateTime @default(now())
+
+  league        League                   @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  owner         User?                    @relation(fields: [ownerUserId], references: [id])
+  players       Player[]
+  aiManager     AiManager?
+  homeFixtures  Fixture[]                @relation("HomeFixtures")
+  awayFixtures  Fixture[]                @relation("AwayFixtures")
+  matchPlans    MatchPlan[]
+  trainingPlans TrainingPlan[]
+  familiarity   TacticalFamiliarity[]
+  history       ClubHistory[]
+  performances  PlayerMatchPerformance[]
+  conversations AiConversation[]
+  aiDecisions   AiDecision[]
+  memories      AiMemory[]
+  auditLogs     AuditLog[]
+
+  @@unique([leagueId, name])
+  @@index([ownerUserId])
+}
+
+model ClubHistory {
+  id             String   @id @default(cuid())
+  clubId         String
+  seasonId       String
+  matchdayId     String
+  matchdayNumber Int
+  position       Int
+  played         Int
+  won            Int
+  drawn          Int
+  lost           Int
+  goalsFor       Int
+  goalsAgainst   Int
+  points         Int
+  /// Most recent results, newest last, e.g. "WWDLW".
+  formGuide      String   @default("")
+  createdAt      DateTime @default(now())
+
+  club     Club     @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  season   Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  matchday Matchday @relation(fields: [matchdayId], references: [id], onDelete: Cascade)
+
+  @@unique([clubId, matchdayId])
+}
+
+/// The AI coaching staff member attached to a club. It advises; it never decides.
+model AiManager {
+  id         String   @id @default(cuid())
+  clubId     String   @unique
+  name       String
+  persona    String
+  /// The human manager's stated footballing philosophy, in their own words.
+  philosophy String   @default("")
+  createdAt  DateTime @default(now())
+
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+}
+
+enum Position {
+  GK
+  DC
+  DL
+  DR
+  DM
+  MC
+  ML
+  MR
+  AM
+  AML
+  AMR
+  ST
+}
+
+enum Foot {
+  LEFT
+  RIGHT
+  BOTH
+}
+
+model Player {
+  id                 String     @id @default(cuid())
+  clubId             String
+  firstName          String
+  lastName           String
+  age                Int
+  shirtNumber        Int
+  primaryPosition    Position
+  secondaryPositions Position[]
+  preferredFoot      Foot
+  /// Ceiling of development, 1-100, hidden from other managers.
+  potential          Int
+  personality        String
+  contractUntil      Int
+  wageThousands      Int
+  createdAt          DateTime   @default(now())
+
+  club            Club                     @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  attributes      PlayerAttribute?
+  state           PlayerState?
+  assignments     PlayerRoleAssignment[]
+  performances    PlayerMatchPerformance[]
+  familiarity     PlayerFamiliarity[]
+  events          MatchEvent[]             @relation("EventPlayer")
+  secondaryEvents MatchEvent[]             @relation("EventSecondaryPlayer")
+
+  @@unique([clubId, shirtNumber])
+  @@index([clubId])
+}
+
+/// Static-ish ability. All values 1-100.
+model PlayerAttribute {
+  playerId String @id
+
+  // Technical
+  passing    Int
+  firstTouch Int
+  dribbling  Int
+  finishing  Int
+  crossing   Int
+  tackling   Int
+  marking    Int
+  heading    Int
+  longShots  Int
+  setPieces  Int
+
+  // Mental
+  decisions     Int
+  positioning   Int
+  composure     Int
+  concentration Int
+  anticipation  Int
+  workRate      Int
+  teamwork      Int
+  vision        Int
+  determination Int
+
+  // Physical
+  pace         Int
+  acceleration Int
+  stamina      Int
+  strength     Int
+  agility      Int
+  balance      Int
+
+  // Goalkeeping
+  handling     Int
+  reflexes     Int
+  oneOnOnes    Int
+  distribution Int
+
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+}
+
+enum InjurySeverity {
+  NONE
+  KNOCK
+  MINOR
+  MODERATE
+  SERIOUS
+}
+
+/// Week-to-week condition. This is what training and matches actually move.
+model PlayerState {
+  playerId String @id
+
+  fitness        Int @default(100)
+  fatigue        Int @default(0)
+  morale         Int @default(60)
+  form           Int @default(50)
+  confidence     Int @default(50)
+  matchSharpness Int @default(60)
+
+  injury            InjurySeverity @default(NONE)
+  injuryDescription String?
+  injuryWeeksLeft   Int            @default(0)
+  suspensionMatches Int            @default(0)
+  yellowCardsSeason Int            @default(0)
+  redCardsSeason    Int            @default(0)
+
+  appearances Int   @default(0)
+  goals       Int   @default(0)
+  assists     Int   @default(0)
+  minutes     Int   @default(0)
+  ratingSum   Float @default(0)
+
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Tactical vocabulary
+// ---------------------------------------------------------------------------
+
+enum Formation {
+  F_4_3_3
+  F_4_2_3_1
+  F_4_4_2
+  F_3_5_2
+  F_5_3_2
+}
+
+enum Mentality {
+  VERY_DEFENSIVE
+  DEFENSIVE
+  BALANCED
+  POSITIVE
+  ATTACKING
+}
+
+enum PlayingStyle {
+  POSSESSION
+  BALANCED
+  DIRECT
+  COUNTER_ATTACKING
+  HIGH_TEMPO
+  PATIENT_BUILD_UP
+}
+
+enum PressingIntensity {
+  LOW
+  MEDIUM
+  HIGH
+  INTENSE
+}
+
+enum DefensiveLine {
+  DEEP
+  STANDARD
+  HIGH
+  VERY_HIGH
+}
+
+enum BuildUp {
+  SHORT_PASSING
+  MIXED
+  DIRECT
+  LONG_DISTRIBUTION
+}
+
+enum Width {
+  NARROW
+  BALANCED
+  WIDE
+}
+
+enum DefensiveApproach {
+  ZONAL
+  MAN_ORIENTED
+  AGGRESSIVE_PRESSING
+  COMPACT_BLOCK
+  MID_BLOCK
+  LOW_BLOCK
+}
+
+enum Tempo {
+  VERY_SLOW
+  SLOW
+  NORMAL
+  FAST
+  VERY_FAST
+}
+
+enum RiskTolerance {
+  CAUTIOUS
+  MEASURED
+  BALANCED
+  BOLD
+  RECKLESS
+}
+
+enum AttackingFocus {
+  LEFT_FLANK
+  RIGHT_FLANK
+  BOTH_FLANKS
+  CENTRAL
+  MIXED
+}
+
+enum SetPieceApproach {
+  SHORT
+  MIXED
+  DIRECT_DELIVERY
+  NEAR_POST
+  FAR_POST
+}
+
+enum PlayerRole {
+  GOALKEEPER
+  SWEEPER_KEEPER
+  FULL_BACK
+  WING_BACK
+  INVERTED_FULL_BACK
+  ATTACKING_FULL_BACK
+  CENTRAL_DEFENDER
+  BALL_PLAYING_DEFENDER
+  STOPPER
+  COVER_DEFENDER
+  WIDE_CENTRE_BACK
+  ANCHOR
+  DEEP_LYING_PLAYMAKER
+  BALL_WINNING_MIDFIELDER
+  HALF_BACK
+  CENTRAL_MIDFIELDER
+  BOX_TO_BOX
+  MEZZALA
+  ROAMING_PLAYMAKER
+  CARRILERO
+  ATTACKING_MIDFIELDER
+  ADVANCED_PLAYMAKER
+  SHADOW_STRIKER
+  WINGER
+  INVERTED_WINGER
+  WIDE_PLAYMAKER
+  WIDE_TARGET_MAN
+  ADVANCED_FORWARD
+  TARGET_MAN
+  POACHER
+  COMPLETE_FORWARD
+  FALSE_NINE
+  PRESSING_FORWARD
+}
+
+// ---------------------------------------------------------------------------
+// Plans
+// ---------------------------------------------------------------------------
+
+enum PlanStatus {
+  DRAFT
+  PROPOSED
+  APPROVED
+  LOCKED
+}
+
+enum PlanSource {
+  MANUAL
+  AI_ASSISTED
+}
+
+/// One club's preparation for one fixture: tactics plus line-up.
+model MatchPlan {
+  id         String     @id @default(cuid())
+  fixtureId  String
+  clubId     String
+  status     PlanStatus @default(DRAFT)
+  source     PlanSource @default(MANUAL)
+  notes      String     @default("")
+  approvedAt DateTime?
+  lockedAt   DateTime?
+  updatedAt  DateTime   @updatedAt
+  createdAt  DateTime   @default(now())
+
+  fixture Fixture       @relation(fields: [fixtureId], references: [id], onDelete: Cascade)
+  club    Club          @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  tactics TacticalPlan?
+  lineup  Lineup?
+
+  @@unique([fixtureId, clubId])
+  @@index([clubId])
+}
+
+model TacticalPlan {
+  id          String @id @default(cuid())
+  matchPlanId String @unique
+
+  formation         Formation
+  mentality         Mentality
+  playingStyle      PlayingStyle
+  pressing          PressingIntensity
+  defensiveLine     DefensiveLine
+  buildUp           BuildUp
+  width             Width
+  defensiveApproach DefensiveApproach
+  tempo             Tempo
+  riskTolerance     RiskTolerance
+  attackingFocus    AttackingFocus
+  setPieceApproach  SetPieceApproach
+
+  counterPress    Boolean @default(false)
+  counterAttack   Boolean @default(false)
+  offsideTrap     Boolean @default(false)
+  fullBackFreedom Int     @default(50)
+
+  /// Ordered conditional instructions, validated against MatchStateInstruction.
+  matchStateInstructions Json  @default("[]")
+  /// Planned substitutions, validated against SubstitutionPlan.
+  substitutionPlan       Json  @default("[]")
+  /// Snapshot of the tactical-change analysis at submission time.
+  changeAnalysis         Json?
+
+  matchPlan MatchPlan @relation(fields: [matchPlanId], references: [id], onDelete: Cascade)
+}
+
+model Lineup {
+  id              String  @id @default(cuid())
+  matchPlanId     String  @unique
+  captainPlayerId String?
+
+  matchPlan   MatchPlan              @relation(fields: [matchPlanId], references: [id], onDelete: Cascade)
+  assignments PlayerRoleAssignment[]
+}
+
+model PlayerRoleAssignment {
+  id         String     @id @default(cuid())
+  lineupId   String
+  playerId   String
+  /// Formation slot key, e.g. "GK", "DL", "DCL", "MC", "STC".
+  slot       String
+  position   Position
+  role       PlayerRole
+  isStarter  Boolean    @default(true)
+  benchOrder Int?
+
+  lineup Lineup @relation(fields: [lineupId], references: [id], onDelete: Cascade)
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([lineupId, playerId])
+  @@index([lineupId])
+}
+
+enum TrainingFocus {
+  RECOVERY
+  FITNESS
+  POSSESSION
+  PRESSING
+  DEFENSIVE_ORGANISATION
+  ATTACKING_PATTERNS
+  TRANSITION_PLAY
+  SET_PIECES
+  FORMATION_FAMILIARITY
+  INDIVIDUAL_ROLES
+  MATCH_PREPARATION
+}
+
+enum TrainingIntensity {
+  LIGHT
+  NORMAL
+  HIGH
+  VERY_HIGH
+}
+
+model TrainingPlan {
+  id              String            @id @default(cuid())
+  clubId          String
+  matchdayId      String
+  primaryFocus    TrainingFocus
+  secondaryFocus  TrainingFocus
+  intensity       TrainingIntensity @default(NORMAL)
+  /// [{ playerId, role }] individual role work, validated in the domain layer.
+  individualFocus Json              @default("[]")
+  status          PlanStatus        @default(DRAFT)
+  source          PlanSource        @default(MANUAL)
+  notes           String            @default("")
+  approvedAt      DateTime?
+  /// What the session actually did, written back after the week is processed.
+  appliedEffects  Json?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  club     Club     @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  matchday Matchday @relation(fields: [matchdayId], references: [id], onDelete: Cascade)
+
+  @@unique([clubId, matchdayId])
+}
+
+// ---------------------------------------------------------------------------
+// Tactical familiarity
+// ---------------------------------------------------------------------------
+
+/// Familiarity is tracked per dimension rather than as one cohesion number, so
+/// that a gap in (say) pressing work degrades pressing specifically.
+enum FamiliarityDimension {
+  FORMATION
+  PLAYING_STYLE
+  PRESSING
+  DEFENSIVE_ORGANISATION
+  BUILD_UP
+  TRANSITION
+  SET_PIECES
+  OVERALL_STABILITY
+}
+
+model TacticalFamiliarity {
+  id        String               @id @default(cuid())
+  clubId    String
+  dimension FamiliarityDimension
+  /// Discriminator inside a dimension: formation code, style code, or "_" for
+  /// dimensions that have a single value.
+  key       String               @default("_")
+  value     Float                @default(35)
+  updatedAt DateTime             @updatedAt
+
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+
+  @@unique([clubId, dimension, key])
+  @@index([clubId])
+}
+
+enum PlayerFamiliarityKind {
+  ROLE
+  POSITION
+}
+
+model PlayerFamiliarity {
+  id        String                @id @default(cuid())
+  playerId  String
+  kind      PlayerFamiliarityKind
+  key       String
+  value     Float                 @default(35)
+  updatedAt DateTime              @updatedAt
+
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, kind, key])
+  @@index([playerId])
+}
+
+// ---------------------------------------------------------------------------
+// Match results
+// ---------------------------------------------------------------------------
+
+enum TeamSide {
+  HOME
+  AWAY
+}
+
+model Match {
+  id            String   @id @default(cuid())
+  fixtureId     String   @unique
+  engineVersion String
+  seed          String
+  homeGoals     Int
+  awayGoals     Int
+  simulatedAt   DateTime @default(now())
+  /// The exact engine input, so a result can be re-derived and audited.
+  inputSnapshot Json
+
+  fixture      Fixture                  @relation(fields: [fixtureId], references: [id], onDelete: Cascade)
+  events       MatchEvent[]
+  statistics   MatchStatistic[]
+  performances PlayerMatchPerformance[]
+}
+
+enum MatchEventType {
+  KICK_OFF
+  POSSESSION_SEQUENCE
+  BUILD_UP
+  PRESSING_ACTION
+  TACKLE
+  INTERCEPTION
+  FOUL
+  YELLOW_CARD
+  RED_CARD
+  SHOT
+  SHOT_ON_TARGET
+  SAVE
+  GOAL
+  OWN_GOAL
+  PENALTY_AWARDED
+  PENALTY_MISSED
+  CORNER
+  OFFSIDE
+  INJURY
+  SUBSTITUTION
+  TACTICAL_CHANGE
+  HALF_TIME
+  FULL_TIME
+}
+
+model MatchEvent {
+  id                String         @id @default(cuid())
+  matchId           String
+  sequence          Int
+  minute            Int
+  type              MatchEventType
+  side              TeamSide?
+  playerId          String?
+  secondaryPlayerId String?
+  /// Machine-readable facts. Reports are generated from these, never invented.
+  detail            Json           @default("{}")
+  description       String
+
+  match           Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  player          Player? @relation("EventPlayer", fields: [playerId], references: [id])
+  secondaryPlayer Player? @relation("EventSecondaryPlayer", fields: [secondaryPlayerId], references: [id])
+
+  @@index([matchId, sequence])
+}
+
+model MatchStatistic {
+  id      String   @id @default(cuid())
+  matchId String
+  side    TeamSide
+
+  possession      Float
+  shots           Int
+  shotsOnTarget   Int
+  expectedGoals   Float
+  passes          Int
+  passesCompleted Int
+  fouls           Int
+  yellowCards     Int
+  redCards        Int
+  corners         Int
+  offsides        Int
+  tackles         Int
+  interceptions   Int
+  pressingActions Int
+  saves           Int
+  bigChances      Int
+  /// Derived tactical fingerprint used by opponent analysis.
+  tacticalSummary Json  @default("{}")
+
+  match Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, side])
+}
+
+model PlayerMatchPerformance {
+  id       String   @id @default(cuid())
+  matchId  String
+  playerId String
+  clubId   String
+  side     TeamSide
+
+  minutesPlayed   Int
+  position        Position
+  role            PlayerRole
+  rating          Float
+  goals           Int        @default(0)
+  assists         Int        @default(0)
+  shots           Int        @default(0)
+  shotsOnTarget   Int        @default(0)
+  expectedGoals   Float      @default(0)
+  passes          Int        @default(0)
+  passesCompleted Int        @default(0)
+  keyPasses       Int        @default(0)
+  tackles         Int        @default(0)
+  interceptions   Int        @default(0)
+  saves           Int        @default(0)
+  fouls           Int        @default(0)
+  yellowCard      Boolean    @default(false)
+  redCard         Boolean    @default(false)
+  injured         Boolean    @default(false)
+
+  match  Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  club   Club   @relation(fields: [clubId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, playerId])
+  @@index([playerId])
+}
+
+// ---------------------------------------------------------------------------
+// AI coaching staff
+// ---------------------------------------------------------------------------
+
+model AiConversation {
+  id        String   @id @default(cuid())
+  clubId    String
+  userId    String
+  title     String   @default("Coaching staff")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  club      Club         @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  AiMessage[]
+  decisions AiDecision[]
+
+  @@index([clubId])
+}
+
+enum AiMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  TOOL
+}
+
+model AiMessage {
+  id             String        @id @default(cuid())
+  conversationId String
+  role           AiMessageRole
+  content        String
+  /// Structured proposal attached to an assistant turn, if any.
+  payload        Json?
+  createdAt      DateTime      @default(now())
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+enum AiDecisionKind {
+  TACTICAL_PLAN
+  TRAINING_PLAN
+  LINEUP_SELECTION
+  SUBSTITUTION_PLAN
+  MATCH_STATE_INSTRUCTION
+  SCOUTING_SUMMARY
+}
+
+enum AiDecisionStatus {
+  PROPOSED
+  APPROVED
+  REJECTED
+  INVALID
+  SUPERSEDED
+}
+
+/// Every AI proposal is logged with its validation result and what the human did
+/// with it. Nothing here is applied to game state until a human approves it.
+model AiDecision {
+  id             String           @id @default(cuid())
+  clubId         String
+  matchdayId     String?
+  conversationId String?
+  kind           AiDecisionKind
+  status         AiDecisionStatus @default(PROPOSED)
+  provider       String
+  model          String
+  fallbackUsed   Boolean          @default(false)
+  latencyMs      Int              @default(0)
+  /// Raw structured proposal returned by the provider.
+  proposal       Json
+  /// Domain validation outcome: ok, errors, warnings.
+  validation     Json
+  rationale      String           @default("")
+  approvedById   String?
+  approvedAt     DateTime?
+  createdAt      DateTime         @default(now())
+
+  club         Club            @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  matchday     Matchday?       @relation(fields: [matchdayId], references: [id], onDelete: Cascade)
+  conversation AiConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  approvedBy   User?           @relation("AiDecisionApprover", fields: [approvedById], references: [id])
+
+  @@index([clubId, createdAt])
+}
+
+model AiMemory {
+  id         String   @id @default(cuid())
+  clubId     String
+  key        String
+  content    String
+  importance Int      @default(3)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+
+  @@unique([clubId, key])
+}
+
+// ---------------------------------------------------------------------------
+// Reporting and audit
+// ---------------------------------------------------------------------------
+
+enum ReportKind {
+  LEAGUE_ROUNDUP
+  MATCH_REPORT
+}
+
+model Report {
+  id          String     @id @default(cuid())
+  seasonId    String
+  matchdayId  String
+  fixtureId   String?
+  kind        ReportKind
+  /// Structured, machine-checkable facts drawn straight from the simulation.
+  payload     Json
+  /// Narrative built from those facts. Never a free invention.
+  narrative   String     @default("")
+  publishedAt DateTime   @default(now())
+
+  season   Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  matchday Matchday @relation(fields: [matchdayId], references: [id], onDelete: Cascade)
+  fixture  Fixture? @relation(fields: [fixtureId], references: [id], onDelete: Cascade)
+
+  @@index([matchdayId, kind])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  leagueId  String?
+  clubId    String?
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  league League? @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  club   Club?   @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([leagueId, createdAt])
+  @@index([clubId, createdAt])
+}
