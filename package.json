@@ -18,7 +18,9 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
     "pg:start": "bash scripts/local-postgres.sh start",
-    "pg:stop": "bash scripts/local-postgres.sh stop"
+    "pg:stop": "bash scripts/local-postgres.sh stop",
+    "check:mobile": "node scripts/mobile-check.mjs",
+    "calibrate": "tsx scripts/calibrate.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -36,6 +38,7 @@
     "@types/node": "^22.9.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "playwright": "^1.63.0",
     "prisma": "^5.22.0",
     "tailwindcss": "^4.0.0",
     "tsx": "^4.19.2",

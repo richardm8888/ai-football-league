@@ -364,9 +364,14 @@ export function canEditPlans(phase: MatchdayPhase, planStatus: PlanStatus): Vali
   return result(issues);
 }
 
+/**
+ * A manager may lock in at any point while the matchday is still open, including
+ * early in the week. Once the deadline has passed the matchday itself locks
+ * every remaining plan, so there is never a state where a plan can neither be
+ * edited nor committed.
+ */
 export function canLockPlan(phase: MatchdayPhase): ValidationResult {
-  const allowed: MatchdayPhase[] = ['TACTICAL_SUBMISSION', 'REVIEW_AND_APPROVAL', 'PREPARATION'];
-  return result(allowed.includes(phase)
+  return result(EDITABLE_PHASES.includes(phase)
     ? []
     : [err('PHASE_NOT_READY', `Plans cannot be locked during ${phase.replace(/_/g, ' ').toLowerCase()}.`)]);
 }

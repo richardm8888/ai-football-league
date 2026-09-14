@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+/*
+ * Mobile-first design tokens.
+ *
+ * The palette is a floodlit-pitch dark theme: it reads well on a phone outdoors
+ * and at night, which is when people actually pick their team. Type scales and
+ * touch targets are sized for thumbs first; the desktop layout is the same
+ * layout with more room.
+ */
+@theme {
+  --color-pitch-950: #071109;
+  --color-pitch-900: #0b1a10;
+  --color-pitch-850: #10241a;
+  --color-pitch-800: #143024;
+  --color-pitch-700: #1c4533;
+  --color-line-700: #24413a;
+
+  --color-ink-50: #f2f7f4;
+  --color-ink-200: #c7d6cd;
+  --color-ink-400: #8ba396;
+  --color-ink-500: #6c8478;
+
+  --color-brand-400: #4ade80;
+  --color-brand-500: #22c55e;
+  --color-brand-600: #16a34a;
+
+  --color-warn-400: #fbbf24;
+  --color-warn-500: #f59e0b;
+  --color-danger-400: #f87171;
+  --color-danger-500: #ef4444;
+  --color-info-400: #60a5fa;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-pitch-950);
+  color: var(--color-ink-50);
+  font-family: var(--font-sans);
+  /* Never let a wide table drag the whole page sideways. */
+  overflow-x: hidden;
+  /* Room for the fixed bottom navigation plus the home indicator. */
+  padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
+}
+
+/* Respect the notch and the home indicator on iOS. */
+.safe-top { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+/* Horizontal scrollers used for tables and chip rows on small screens. */
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+.scroll-x::-webkit-scrollbar { height: 4px; }
+.scroll-x::-webkit-scrollbar-thumb { background: var(--color-line-700); border-radius: 999px; }
+
+/* Inputs must never be under 16px or iOS zooms the whole page on focus. */
+input, select, textarea, button {
+  font-size: max(16px, 1rem);
+  font-family: inherit;
+}
+
+select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--color-ink-400) 50%),
+                    linear-gradient(135deg, var(--color-ink-400) 50%, transparent 50%);
+  background-position: calc(100% - 18px) 55%, calc(100% - 13px) 55%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

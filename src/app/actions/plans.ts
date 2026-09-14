@@ -1,0 +1,106 @@
+'use server';
+
+import { revalidatePath } from 'next/cache';
+import { prisma } from '@/lib/db';
+import type { MatchdayPhase } from '@/domain/types';
+import type { ValidationResult } from '@/domain/validation';
+import { canManageClub } from '@/domain/visibility';
+import { getViewer } from '@/services/auth';
+import { lockMatchPlan, PlanError, saveMatchPlan, saveTrainingPlan } from '@/services/plans';
+import { requireUser } from '@/services/page-context';
+
+/**
+ * Server actions for a manager's own decisions.
+ *
+ * Every action re-establishes who the caller is and whether they manage this
+ * club. The client is never trusted with authorisation, and the matchday phase
+ * is read from the database rather than accepted from the form.
+ */
+
+export interface PlanActionState {
+  error?: string;
+  message?: string;
+  validation?: ValidationResult;
+}
+
+async function authoriseClub(clubId: string) {
+  const user = await requireUser();
+  const viewer = await getViewer(user.id);
+  if (!canManageClub(viewer, clubId)) {
+    throw new PlanError('You do not manage this club.');
+  }
+  return user;
+}
+
+async function phaseForFixture(fixtureId: string): Promise<MatchdayPhase> {
+  const fixture = await prisma.fixture.findUniqueOrThrow({
+    where: { id: fixtureId }, include: { matchday: true },
+  });
+  return fixture.matchday.phase as MatchdayPhase;
+}
+
+export async function saveMatchPlanAction(
+  _state: PlanActionState, formData: FormData,
+): Promise<PlanActionState> {
+  const fixtureId = String(formData.get('fixtureId') ?? '');
+  const clubId = String(formData.get('clubId') ?? '');
+  const approve = formData.get('approve') === '1';
+
+  try {
+    const user = await authoriseClub(clubId);
+    const plan = JSON.parse(String(formData.get('plan') ?? '{}'));
+    await saveMatchPlan({
+      fixtureId, clubId, userId: user.id,
+      phase: await phaseForFixture(fixtureId),
+      plan, approve, source: formData.get('source') === 'AI_ASSISTED' ? 'AI_ASSISTED' : 'MANUAL',
+    });
+  } catch (error) {
+    if (error instanceof PlanError) return { error: error.message, validation: error.validation };
+    throw error;
+  }
+  revalidatePath('/tactics');
+  revalidatePath('/club');
+  return { message: approve ? 'Plan approved. Lock it in when you are ready.' : 'Draft saved.' };
+}
+
+export async function lockMatchPlanAction(
+  _state: PlanActionState, formData: FormData,
+): Promise<PlanActionState> {
+  const fixtureId = String(formData.get('fixtureId') ?? '');
+  const clubId = String(formData.get('clubId') ?? '');
+  try {
+    const user = await authoriseClub(clubId);
+    await lockMatchPlan(fixtureId, clubId, user.id, await phaseForFixture(fixtureId));
+  } catch (error) {
+    if (error instanceof PlanError) return { error: error.message, validation: error.validation };
+    throw error;
+  }
+  revalidatePath('/tactics');
+  revalidatePath('/club');
+  return { message: 'Locked in. Your plan is frozen until the matchday is simulated.' };
+}
+
+export async function saveTrainingPlanAction(
+  _state: PlanActionState, formData: FormData,
+): Promise<PlanActionState> {
+  const clubId = String(formData.get('clubId') ?? '');
+  const matchdayId = String(formData.get('matchdayId') ?? '');
+  const approve = formData.get('approve') === '1';
+  try {
+    const user = await authoriseClub(clubId);
+    const matchday = await prisma.matchday.findUniqueOrThrow({ where: { id: matchdayId } });
+    await saveTrainingPlan({
+      clubId, matchdayId, userId: user.id,
+      phase: matchday.phase as MatchdayPhase,
+      plan: JSON.parse(String(formData.get('plan') ?? '{}')),
+      approve,
+      source: formData.get('source') === 'AI_ASSISTED' ? 'AI_ASSISTED' : 'MANUAL',
+    });
+  } catch (error) {
+    if (error instanceof PlanError) return { error: error.message, validation: error.validation };
+    throw error;
+  }
+  revalidatePath('/training');
+  revalidatePath('/club');
+  return { message: approve ? 'Training approved.' : 'Training draft saved.' };
+}

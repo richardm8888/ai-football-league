@@ -95,6 +95,13 @@ export async function advancePhase(matchdayId: string, userId: string): Promise<
   }
 
   await prisma.matchday.update({ where: { id: matchdayId }, data: { phase: target } });
+
+  // Reaching LOCKED is the deadline passing: every plan still outstanding is
+  // committed as it stands, so no club is left unable to either edit or lock.
+  if (target === 'LOCKED') {
+    await lockOutstandingPlans(matchdayId, userId);
+  }
+
   await recordAudit({
     action: 'MATCHDAY_PHASE_ADVANCED', entity: 'Matchday', entityId: matchdayId, userId,
     before: { phase: matchday.phase }, after: { phase: target },
@@ -172,4 +179,23 @@ export async function getFixtureForClub(matchdayId: string, clubId: string) {
     where: { matchdayId, OR: [{ homeClubId: clubId }, { awayClubId: clubId }] },
     include: { homeClub: true, awayClub: true, matchday: true, match: true },
   });
+}
+
+/** Freeze every plan that is not yet locked when the deadline arrives. */
+export async function lockOutstandingPlans(matchdayId: string, userId: string): Promise<number> {
+  const plans = await prisma.matchPlan.findMany({
+    where: { fixture: { matchdayId }, status: { not: 'LOCKED' } },
+    select: { id: true, clubId: true },
+  });
+  if (plans.length === 0) return 0;
+  const now = new Date();
+  await prisma.matchPlan.updateMany({
+    where: { id: { in: plans.map((p) => p.id) } },
+    data: { status: 'LOCKED', lockedAt: now },
+  });
+  await recordAudit({
+    action: 'MATCHDAY_DEADLINE_LOCK', entity: 'Matchday', entityId: matchdayId, userId,
+    after: { lockedPlans: plans.length, clubs: plans.map((p) => p.clubId) },
+  });
+  return plans.length;
 }
