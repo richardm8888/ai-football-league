@@ -259,7 +259,9 @@ export function simulateMatch(input: MatchInput): MatchResult {
         const current = state.fitness.get(player.id) ?? 100;
         const stamina = player.attributes.stamina;
         const workRate = player.attributes.workRate;
-        const drain = (0.42 + (100 - stamina) / 320 + (workRate / 100) * 0.1)
+        // Tuned so a full ninety minutes costs a well-conditioned player about
+        // a quarter of their sharpness, not half of it.
+        const drain = (0.2 + (100 - stamina) / 620 + (workRate / 100) * 0.06)
           * state.profile.fatigueRate;
         state.fitness.set(player.id, clamp(current - drain, 15, 100));
         state.minutes.set(player.id, (state.minutes.get(player.id) ?? 0) + 1);

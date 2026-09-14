@@ -103,9 +103,12 @@ export function applyTrainingWeek(
 
     // Older legs recover more slowly and tire faster.
     const ageFactor = next.age >= 31 ? 1.25 : next.age <= 22 ? 0.85 : 1;
-    next.fatigue = clamp(next.fatigue + load * 3 * ageFactor - 4, 0, 100);
+    next.fatigue = clamp(
+      next.fatigue + load * 3 * ageFactor - (10 + next.fatigue * 0.25), 0, 100);
+    // Accumulated fatigue caps how fresh a player can get back to in one week.
+    const ceiling = clamp(100 - next.fatigue * 0.32, 58, 100);
     next.fitness = clamp(
-      next.fitness + fitnessGain + (8 - next.fatigue * 0.12) - Math.max(0, load) * 1.2, 0, 100);
+      next.fitness + (ceiling - next.fitness) * 0.7 + fitnessGain - Math.max(0, load) * 2, 0, 100);
     next.matchSharpness = clamp(next.matchSharpness + sharpnessGain - 1, 0, 100);
 
     // Injury risk: intensity, accumulated fatigue and age all push it up.
@@ -210,7 +213,7 @@ export function applyMatchAftermath(input: AftermathInput): WeeklyPlayerState {
 
   const minutes = performance.minutesPlayed;
   next.fitness = clamp(performance.endFitness, 0, 100);
-  next.fatigue = clamp(next.fatigue + minutes * 0.28, 0, 100);
+  next.fatigue = clamp(next.fatigue + minutes * 0.22, 0, 100);
   next.matchSharpness = clamp(next.matchSharpness + minutes * 0.09, 0, 100);
 
   // Form follows the performance rating, smoothed so one match is not decisive.
