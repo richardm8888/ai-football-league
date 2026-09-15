@@ -224,3 +224,119 @@ export async function assignClub(leagueId: string, clubId: string, userId: strin
   await prisma.club.update({ where: { id: clubId }, data: { ownerUserId: userId } });
   await recordAudit({ action: 'CLUB_ASSIGNED', entity: 'Club', entityId: clubId, leagueId, clubId, userId: userId ?? undefined });
 }
+
+/**
+ * Rewind a league to day one, keeping the clubs it already has.
+ *
+ * An interim testing tool, not a game mechanic: it lets a group replay the
+ * opening week as many times as it takes to get the flow right. The clubs,
+ * squads and fixture list survive, so a run can be compared against the one
+ * before it; everything the league went on to do is removed.
+ *
+ * Club ownership is cleared too. Choosing a club is part of the starting flow,
+ * so a reset that left everyone holding the club they picked last time could
+ * not be used to test it.
+ *
+ * Starting condition is re-derived per player rather than restored from a
+ * snapshot, seeded on the player's own id: reproducible for a given squad, and
+ * varied in the same way generation makes it, so week one is not uniformly
+ * perfect.
+ */
+export async function resetSeason(leagueId: string, userId: string) {
+  const season = await prisma.season.findFirst({
+    where: { leagueId },
+    orderBy: { createdAt: 'desc' },
+    include: { matchdays: { orderBy: { number: 'asc' } } },
+  });
+  if (!season) throw new LeagueError('This league has no season to reset.');
+
+  const clubs = await prisma.club.findMany({ where: { leagueId }, select: { id: true } });
+  const clubIds = clubs.map((c) => c.id);
+  const players = await prisma.player.findMany({
+    where: { clubId: { in: clubIds } }, select: { id: true },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    // Everything the league did. Matches cascade to events, statistics and
+    // performances; match plans cascade to their tactics and line-ups.
+    await tx.match.deleteMany({ where: { fixture: { seasonId: season.id } } });
+    await tx.matchPlan.deleteMany({ where: { fixture: { seasonId: season.id } } });
+    await tx.trainingPlan.deleteMany({ where: { clubId: { in: clubIds } } });
+    await tx.report.deleteMany({ where: { seasonId: season.id } });
+    await tx.clubHistory.deleteMany({ where: { seasonId: season.id } });
+
+    // Everything the coaching staff remembers.
+    await tx.aiDecision.deleteMany({ where: { clubId: { in: clubIds } } });
+    await tx.aiMemory.deleteMany({ where: { clubId: { in: clubIds } } });
+    await tx.aiConversation.deleteMany({ where: { clubId: { in: clubIds } } });
+
+    // Everything the squads learned.
+    await tx.playerFamiliarity.deleteMany({ where: { player: { clubId: { in: clubIds } } } });
+    await tx.tacticalFamiliarity.deleteMany({ where: { clubId: { in: clubIds } } });
+    for (const clubId of clubIds) {
+      const rng = createRng(`reset:${clubId}`);
+      await tx.tacticalFamiliarity.createMany({
+        data: [
+          { clubId, dimension: 'TRANSITION', key: '_', value: UNTRAINED_FAMILIARITY + rng.int(0, 8) },
+          { clubId, dimension: 'SET_PIECES', key: '_', value: UNTRAINED_FAMILIARITY + rng.int(0, 8) },
+          { clubId, dimension: 'OVERALL_STABILITY', key: '_', value: UNTRAINED_FAMILIARITY + rng.int(0, 10) },
+          { clubId, dimension: 'FORMATION', key: 'F_4_3_3', value: UNTRAINED_FAMILIARITY + rng.int(5, 20) },
+          { clubId, dimension: 'PLAYING_STYLE', key: 'BALANCED', value: UNTRAINED_FAMILIARITY + rng.int(5, 18) },
+          { clubId, dimension: 'PRESSING', key: 'MEDIUM', value: UNTRAINED_FAMILIARITY + rng.int(5, 18) },
+          { clubId, dimension: 'DEFENSIVE_ORGANISATION', key: 'MID_BLOCK', value: UNTRAINED_FAMILIARITY + rng.int(5, 18) },
+          { clubId, dimension: 'BUILD_UP', key: 'MIXED', value: UNTRAINED_FAMILIARITY + rng.int(5, 18) },
+        ],
+      });
+    }
+
+    // Every player back to a fresh pre-season condition.
+    for (const player of players) {
+      const rng = createRng(`reset:${player.id}`);
+      await tx.playerState.update({
+        where: { playerId: player.id },
+        data: {
+          fitness: rng.int(88, 100),
+          fatigue: 0,
+          morale: rng.int(48, 78),
+          form: rng.int(40, 62),
+          confidence: 55,
+          matchSharpness: rng.int(45, 70),
+          injury: 'NONE',
+          injuryDescription: null,
+          injuryWeeksLeft: 0,
+          suspensionMatches: 0,
+          yellowCardsSeason: 0,
+          redCardsSeason: 0,
+          appearances: 0,
+          goals: 0,
+          assists: 0,
+          minutes: 0,
+          ratingSum: 0,
+        },
+      });
+    }
+
+    // The calendar, back to an unplayed matchday one.
+    await tx.fixture.updateMany({
+      where: { seasonId: season.id },
+      data: { status: 'SCHEDULED' },
+    });
+    await tx.matchday.updateMany({
+      where: { seasonId: season.id },
+      data: { phase: 'OPEN', simulatedAt: null },
+    });
+    await tx.season.update({ where: { id: season.id }, data: { status: 'ACTIVE' } });
+
+    // Clubs go back on the shelf so the joining flow can be walked again.
+    await tx.club.updateMany({
+      where: { leagueId },
+      data: { ownerUserId: null, morale: 60 },
+    });
+  }, { timeout: 120_000 });
+
+  await recordAudit({
+    action: 'LEAGUE_RESET', entity: 'League', entityId: leagueId, leagueId, userId,
+    after: { seasonId: season.id, clubs: clubIds.length, players: players.length },
+  });
+  return season;
+}

@@ -3,7 +3,7 @@
 import { useActionState } from 'react';
 import {
   advancePhaseAction, assignClubAction, openNextMatchdayAction, reopenMatchdayAction,
-  simulateMatchdayAction, startSeasonAction, type AdminActionState,
+  resetSeasonAction, simulateMatchdayAction, startSeasonAction, type AdminActionState,
 } from '@/app/actions/admin';
 import type { MatchdayPhase } from '@/domain/types';
 import { SubmitButton } from './submit-button';
@@ -33,8 +33,9 @@ export function AdminPanel({
   const [reopenState, reopenAction] = useActionState(reopenMatchdayAction, {} as AdminActionState);
   const [assignState, assignAction] = useActionState(assignClubAction, {} as AdminActionState);
   const [seasonState, seasonAction] = useActionState(startSeasonAction, {} as AdminActionState);
+  const [resetState, resetAction] = useActionState(resetSeasonAction, {} as AdminActionState);
 
-  const states = [phaseState, simState, nextState, reopenState, assignState, seasonState];
+  const states = [phaseState, simState, nextState, reopenState, assignState, seasonState, resetState];
   const message = states.find((s) => s.message)?.message;
   const error = states.find((s) => s.error)?.error;
 
@@ -160,6 +161,32 @@ export function AdminPanel({
           </ul>
         )}
       </Card>
+
+      {hasSeason && (
+        <Card>
+          <CardTitle>Reset to day one</CardTitle>
+          <p className="text-sm text-ink-400">
+            Puts the league back to an unplayed matchday one, keeping the same clubs,
+            squads and fixtures. Every result, plan, report and conversation is
+            deleted, and every club goes back on the shelf for managers to pick
+            again. This cannot be undone.
+          </p>
+          <form action={resetAction} className="mt-3 space-y-2">
+            <input type="hidden" name="leagueId" value={leagueId} />
+            <label className="block text-sm text-ink-400" htmlFor="reset-confirm">
+              Type the league name to confirm
+            </label>
+            <input
+              id="reset-confirm"
+              name="confirm"
+              autoComplete="off"
+              placeholder="League name"
+              className={inputClass}
+            />
+            <SubmitButton tone="danger">Reset the league</SubmitButton>
+          </form>
+        </Card>
+      )}
     </div>
   );
 }
