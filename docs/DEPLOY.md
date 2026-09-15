@@ -154,7 +154,7 @@ to the box; it has no business holding the database password as well.
 Create the schema once, before the first deploy:
 
 ```bash
-docker compose -f docker-compose.prod.yml run --rm app npx prisma migrate deploy
+docker compose -f docker-compose.prod.yml run --rm app node node_modules/prisma/build/index.js migrate deploy
 ```
 
 That is also the command that tells you whether trusted sources are set up
