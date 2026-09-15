@@ -145,8 +145,9 @@ deploy/          The script the droplet runs to swap builds
 
 Read `docs/ARCHITECTURE.md` for how the layers fit together,
 `docs/DECISIONS.md` for why, `docs/BALANCING.md` for the numbers behind the
-simulation and how to retune them, and `docs/DEPLOY.md` for how a merge becomes
-a running container.
+simulation and how to retune them, `docs/AI_COSTS.md` for what a season costs
+with a real API key and what the levers are, and `docs/DEPLOY.md` for how a
+merge becomes a running container.
 
 ## Development
 
@@ -155,6 +156,7 @@ npm run dev            # development server
 npm test               # 194 tests: domain, engine, familiarity, AI, end to end
 npm run typecheck      # strict TypeScript, no emit
 npm run calibrate      # run 900 matches and print the statistical profile
+npm run ai:cost        # measure what one coaching request costs to send
 npm run check:mobile   # walk every screen at five viewport sizes
 npm run db:migrate     # create a migration after a schema change
 ```
