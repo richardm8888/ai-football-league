@@ -3,10 +3,11 @@
 A private, multiplayer football management game. Fantasy Football and Football
 Manager combined for the modern world.
 
-Six to eight friends each take charge of a fictional club. You set the training,
-pick the side, choose how the team plays, and lock it in before the deadline.
-Every fixture is then simulated by a conventional match engine, and the whole
-league gets the same report on Monday morning.
+Six to eight friends each take charge of a fictional club, choosing which one on
+what any manager can see about it: what it is known for, how well thought of it
+is, and how it is doing. You set the training, pick the side, choose how the team
+plays, and lock it in before the deadline. Every fixture is then simulated by a
+conventional match engine, and the whole league gets the same report.
 
 Each manager has an AI coaching staff, and that is how you manage. You tell them
 what you want in plain English; they read your squad and what the opposition have
@@ -79,19 +80,28 @@ brings up a database and the app together.
 
 ## The week
 
-A matchday moves through an explicit state machine, and each phase gates what the
-services will accept.
+There is one deadline a week and one thing to do before it: set your training,
+your shape and your side, in whatever order suits you, then lock in.
 
 | Phase | What happens |
 | --- | --- |
-| Week open | The new matchday opens. Review your club and your next opponent. |
-| Analysis | Study the squad, form, and what the opposition have been doing. |
-| Preparation | Set training priorities and work through ideas with your staff. |
-| Tactical submission | Choose a formation, line-up, roles and instructions. |
-| Review and approval | Check the warnings, approve the plan. |
-| Locked | The deadline. Every outstanding plan is committed as it stands. |
+| Open | Prepare however you like, then lock in. The only phase you act in. |
+| Locked | Every outstanding plan is committed as it stands. |
 | Simulation | Fixtures are played. No AI is involved. |
 | Post match | Results, statistics and reports are published to the league. |
+| Complete | The matchday is finished and the next one opens. |
+
+**The league runs at the pace of its slowest human, and no slower.** The matchday
+plays the moment the last manager locks in, so a group who are all online can get
+through several weeks in an evening, and nobody has to be awake to referee it. If
+someone goes quiet, the deadline sweeps their plan up and the league moves on.
+
+Clubs nobody manages are never something the league waits for: they are frozen on
+the plan their coaching staff would have picked.
+
+The week used to be split into five phases before the deadline. They gated
+nothing — the same actions were legal in all of them — and each one was another
+place a single manager who was away could stall everyone else, so they are gone.
 
 Training runs first, so the week on the grass moves fitness, sharpness and
 familiarity before the match is played. Form, morale, injuries, suspensions and
