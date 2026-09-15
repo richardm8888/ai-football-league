@@ -278,22 +278,22 @@ describe('training plan validation', () => {
 
 describe('matchday phase gates', () => {
   it('allows editing while the week is open and blocks it afterwards', () => {
-    expect(canEditPlans('PREPARATION', 'DRAFT').ok).toBe(true);
-    expect(canEditPlans('REVIEW_AND_APPROVAL', 'APPROVED').ok).toBe(true);
+    expect(canEditPlans('OPEN', 'DRAFT').ok).toBe(true);
+    expect(canEditPlans('OPEN', 'APPROVED').ok).toBe(true);
     expect(canEditPlans('LOCKED', 'APPROVED').ok).toBe(false);
     expect(canEditPlans('SIMULATION', 'APPROVED').ok).toBe(false);
     expect(canEditPlans('POST_MATCH', 'APPROVED').ok).toBe(false);
   });
 
   it('never allows editing a locked plan, whatever the phase', () => {
-    const result = canEditPlans('PREPARATION', 'LOCKED');
+    const result = canEditPlans('OPEN', 'LOCKED');
     expect(result.ok).toBe(false);
     expect(codes(result.errors)).toContain('PLAN_LOCKED');
   });
 
   it('allows locking whenever the matchday is still open', () => {
-    expect(canLockPlan('WEEK_OPEN').ok).toBe(true);
-    expect(canLockPlan('TACTICAL_SUBMISSION').ok).toBe(true);
+    expect(canLockPlan('OPEN').ok).toBe(true);
+    expect(canLockPlan('LOCKED').ok).toBe(false);
     expect(canLockPlan('SIMULATION').ok).toBe(false);
   });
 });

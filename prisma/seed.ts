@@ -76,10 +76,9 @@ async function main() {
         await getOrCreateTrainingPlan(clubId, matchday.id);
       }
     }
-    await setPhase(matchday.id, 'TACTICAL_SUBMISSION', users[0].id);
     for (const fixture of matchday.fixtures) {
       for (const clubId of [fixture.homeClubId, fixture.awayClubId]) {
-        await lockMatchPlan(fixture.id, clubId, users[0].id, 'TACTICAL_SUBMISSION');
+        await lockMatchPlan(fixture.id, clubId, users[0].id, 'OPEN');
       }
     }
     await setPhase(matchday.id, 'LOCKED', users[0].id);

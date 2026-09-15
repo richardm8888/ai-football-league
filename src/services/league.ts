@@ -185,7 +185,7 @@ export async function startSeason(options: StartSeasonOptions) {
         data: {
           seasonId: season.id,
           number,
-          phase: number === 1 ? 'WEEK_OPEN' : 'WEEK_OPEN',
+          phase: 'OPEN',
           deadlineAt: new Date(Date.now() + number * 7 * 24 * 60 * 60 * 1000),
         },
       }));

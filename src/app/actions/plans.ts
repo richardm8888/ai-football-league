@@ -8,6 +8,7 @@ import type { ValidationResult } from '@/domain/validation';
 import { canManageClub } from '@/domain/visibility';
 import { getViewer } from '@/services/auth';
 import { lockMatchPlan, PlanError, saveMatchPlan, saveTrainingPlan } from '@/services/plans';
+import { settleMatchdayIfReady } from '@/services/simulation';
 import { requireUser } from '@/services/page-context';
 
 /**
@@ -89,17 +90,30 @@ export async function lockMatchPlanAction(
 ): Promise<PlanActionState> {
   const fixtureId = String(formData.get('fixtureId') ?? '');
   const clubId = String(formData.get('clubId') ?? '');
+  let played = false;
   try {
     const user = await authoriseClub(clubId);
     await lockMatchPlan(fixtureId, clubId, user.id, await phaseForFixture(fixtureId));
+
+    // Locking in is the last thing the league was waiting for often enough that
+    // it is worth checking every time: if this was the final manager, the match
+    // plays now rather than when somebody remembers to press a button.
+    const fixture = await prisma.fixture.findUnique({
+      where: { id: fixtureId }, select: { matchdayId: true },
+    });
+    if (fixture) played = (await settleMatchdayIfReady(fixture.matchdayId, user.id)) !== null;
   } catch (error) {
     if (error instanceof PlanError) return { error: error.message, validation: error.validation };
     throw error;
   }
   revalidatePath('/tactics');
   revalidatePath('/club');
+  revalidatePath('/match-centre');
+  revalidatePath('/reports');
   return {
-    message: 'Locked in. Your plan is frozen until the matchday is simulated.',
+    message: played
+      ? 'Locked in. That was the last club, so the matchday has been played.'
+      : 'Locked in. Your plan is frozen until the matchday is simulated.',
     outcome: { kind: 'LOCKED', at: new Date().toISOString() },
   };
 }

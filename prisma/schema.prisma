@@ -120,14 +120,12 @@ model Season {
   @@unique([leagueId, name])
 }
 
-/// The weekly state machine. A matchday moves forward one phase at a time and
-/// each phase gates which actions the domain services will accept.
+/// The weekly state machine. A matchday is OPEN until every human manager has
+/// locked in or the deadline passes; the rest is the league resolving itself.
+/// There is one deadline per matchday, not one per task: each extra gate is
+/// another place a single slow manager stalls everyone else.
 enum MatchdayPhase {
-  WEEK_OPEN
-  ANALYSIS
-  PREPARATION
-  TACTICAL_SUBMISSION
-  REVIEW_AND_APPROVAL
+  OPEN
   LOCKED
   SIMULATION
   POST_MATCH
@@ -138,7 +136,7 @@ model Matchday {
   id          String        @id @default(cuid())
   seasonId    String
   number      Int
-  phase       MatchdayPhase @default(WEEK_OPEN)
+  phase       MatchdayPhase @default(OPEN)
   deadlineAt  DateTime?
   simulatedAt DateTime?
   createdAt   DateTime      @default(now())

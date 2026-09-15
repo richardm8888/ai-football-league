@@ -51,7 +51,7 @@ export function PhaseBar({
         </p>
       )}
 
-      {planStatus !== 'LOCKED' && (phase === 'TACTICAL_SUBMISSION' || phase === 'REVIEW_AND_APPROVAL' || phase === 'PREPARATION') && (
+      {planStatus !== 'LOCKED' && phase === 'OPEN' && (
         <Link href="/tactics" className="mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-brand-600 px-4 font-semibold text-pitch-950">
           Review and lock your plan
         </Link>

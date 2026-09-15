@@ -122,7 +122,7 @@ export function AdminPanel({
               </form>
             )}
 
-            {!matchday.played && (matchday.phase === 'LOCKED' || matchday.phase === 'REVIEW_AND_APPROVAL') && (
+            {!matchday.played && (matchday.phase === 'LOCKED' || matchday.phase === 'OPEN') && (
               <form action={reopenAction}>
                 <input type="hidden" name="leagueId" value={leagueId} />
                 <input type="hidden" name="matchdayId" value={matchday.id} />
