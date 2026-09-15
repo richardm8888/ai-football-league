@@ -63,12 +63,17 @@ proposal. Set the key to use a language model instead.
 
 ### Deployment
 
-```bash
-SESSION_SECRET=$(openssl rand -hex 32) docker compose up -d
-```
+Merging a pull request into `main` deploys it. The tests run, the image is
+built and tagged with the commit, and the droplet pulls it, migrates, swaps the
+container and checks that the new build actually answers before keeping it —
+rolling back on its own if it does not.
 
-One app container and one database is the right size for a private league. The
-app runs its own migrations on boot.
+The database is DigitalOcean managed Postgres rather than a container, so
+nothing on the droplet stores data. `docs/DEPLOY.md` covers the one-time setup,
+how to roll back, and how to deploy by hand if GitHub is unavailable.
+
+To run the whole thing locally in containers instead, `docker compose up`
+brings up a database and the app together.
 
 ## The week
 
@@ -123,11 +128,13 @@ src/services/    Persistence and orchestration
 src/app/         Next.js App Router pages and server actions
 src/components/  Mobile-first UI
 tests/           Domain, engine, familiarity, AI and end-to-end suites
+deploy/          The script the droplet runs to swap builds
 ```
 
 Read `docs/ARCHITECTURE.md` for how the layers fit together,
-`docs/DECISIONS.md` for why, and `docs/BALANCING.md` for the numbers behind the
-simulation and how to retune them.
+`docs/DECISIONS.md` for why, `docs/BALANCING.md` for the numbers behind the
+simulation and how to retune them, and `docs/DEPLOY.md` for how a merge becomes
+a running container.
 
 ## Development
 

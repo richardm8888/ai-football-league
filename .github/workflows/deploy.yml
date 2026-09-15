@@ -1,0 +1,108 @@
+name: Deploy
+
+# Ships a commit to the droplet once its image exists.
+#
+# Triggered by the image build finishing rather than by the push itself,
+# because deploying a commit whose image is still building pulls the previous
+# one and looks like the deploy silently did nothing.
+#
+# Requires these repository secrets — see docs/DEPLOY.md:
+#   SSH_HOST         droplet address
+#   SSH_USER         user with docker permissions
+#   SSH_PRIVATE_KEY  private half of a key in that user's authorized_keys
+# and optionally the DEPLOY_PATH variable (defaults to /opt/ai-football-league).
+
+on:
+  workflow_run:
+    workflows: ['Publish image']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Commit to deploy. Leave empty for the tip of main. Use a previous commit to roll back.'
+        required: false
+
+concurrency:
+  # Deploys must not overlap: two of them interleaving migrations and container
+  # swaps is how a database ends up half-migrated. Queue rather than cancel, so
+  # a merge cannot cancel the deploy of the merge before it and leave that
+  # commit unshipped.
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    # A failed or cancelled build has nothing worth shipping. Manual runs skip
+    # the check, since that is how a rollback is triggered during an incident.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    environment:
+      name: production
+      url: ${{ vars.APP_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Choose the commit
+        id: target
+        run: |
+          SHA="${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Deploying $SHA"
+
+      - name: Deploy over SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/ai-football-league' }}
+          SHA: ${{ steps.target.outputs.sha }}
+          # Short-lived and scoped to this repository, so the droplet needs no
+          # stored registry credentials of its own.
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          # The script is written to a file on the droplet and run from there,
+          # NOT piped into `bash -s`. Piped, the script is bash's stdin, and
+          # the first command inside it that reads stdin — `docker compose
+          # run` — swallows the remaining lines: containers are never swapped,
+          # bash reaches EOF and exits 0, and the workflow reports a
+          # successful deploy of code that is not running.
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes "$SSH_USER@$SSH_HOST" \
+            "cat > /tmp/deploy-$SHA.sh \
+             && REGISTRY_TOKEN='$REGISTRY_TOKEN' REGISTRY_USER='$REGISTRY_USER' DEPLOY_PATH='$DEPLOY_PATH' \
+                bash /tmp/deploy-$SHA.sh '$SHA'; \
+             status=\$?; rm -f /tmp/deploy-$SHA.sh; exit \$status" \
+            < deploy/deploy.sh | tee /tmp/deploy-output.txt
+
+          # An exit code alone cannot tell a finished deploy from one that
+          # stopped early and happened to end on a successful command. The
+          # script prints this only after the containers are up and healthy,
+          # so its absence is a failure however green the step looks.
+          if ! grep -q "DEPLOY-COMPLETE $SHA" /tmp/deploy-output.txt; then
+            echo "::error::The deploy script did not run to completion — the container may still be running the previous build."
+            exit 1
+          fi
+
+      - name: Report
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "### Deployed \`${{ steps.target.outputs.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Deploy failed" >> "$GITHUB_STEP_SUMMARY"
+            echo "The droplet rolls back on its own if the new build is unhealthy." >> "$GITHUB_STEP_SUMMARY"
+            echo "Re-run this workflow with an earlier commit to force a specific version." >> "$GITHUB_STEP_SUMMARY"
+          fi

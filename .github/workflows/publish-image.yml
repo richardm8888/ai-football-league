@@ -1,0 +1,58 @@
+name: Publish image
+
+# Builds the app image on GitHub's runners and pushes it to GHCR, so the
+# droplet only ever downloads a ready-made image. Building a Next.js bundle on
+# a small box is slow and can exhaust its memory.
+#
+# The tests run first, as a job dependency. Nothing is published unless they
+# pass, and the deploy is triggered by this workflow succeeding.
+
+# Only main. A pull request being merged is a push to main, which is the event
+# that ships; pushes to feature branches run the tests through CI and stop
+# there.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Every build is tagged with its commit, and only the default branch
+      # moves `latest`. If branch builds moved it too, a branch build finishing
+      # after a merge would leave `latest` pointing at unmerged code, and the
+      # next restart on the droplet would quietly run it.
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=long,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
