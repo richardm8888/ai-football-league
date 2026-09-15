@@ -84,8 +84,7 @@ export const TRAINING_INTENSITIES = ['LIGHT', 'NORMAL', 'HIGH', 'VERY_HIGH'] as 
 export type TrainingIntensity = (typeof TRAINING_INTENSITIES)[number];
 
 export const MATCHDAY_PHASES = [
-  'WEEK_OPEN', 'ANALYSIS', 'PREPARATION', 'TACTICAL_SUBMISSION', 'REVIEW_AND_APPROVAL',
-  'LOCKED', 'SIMULATION', 'POST_MATCH', 'COMPLETE',
+  'OPEN', 'LOCKED', 'SIMULATION', 'POST_MATCH', 'COMPLETE',
 ] as const;
 export type MatchdayPhase = (typeof MATCHDAY_PHASES)[number];
 

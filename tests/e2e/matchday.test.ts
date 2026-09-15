@@ -64,7 +64,7 @@ describe('a league is ready to play', () => {
   it('opens the first matchday', async () => {
     const matchday = await getCurrentMatchday(league.seasonId);
     expect(matchday?.number).toBe(1);
-    expect(matchday?.phase).toBe('WEEK_OPEN');
+    expect(matchday?.phase).toBe('OPEN');
   });
 });
 
@@ -94,11 +94,11 @@ describe('authorisation', () => {
     // An ordinary manager, not the league administrator, who can see everything.
     const viewer = await getViewer(league.users[3].id);
     const other = clubOf(league, league.users[1].id);
-    expect(canViewMatchPlan(viewer, other.id, 'TACTICAL_SUBMISSION')).toBe(false);
+    expect(canViewMatchPlan(viewer, other.id, 'OPEN')).toBe(false);
     expect(canViewMatchPlan(viewer, other.id, 'LOCKED')).toBe(false);
     expect(canViewMatchPlan(viewer, other.id, 'POST_MATCH')).toBe(true);
     // Their own club is always visible to them.
-    expect(canViewMatchPlan(viewer, clubOf(league, league.users[3].id).id, 'TACTICAL_SUBMISSION')).toBe(true);
+    expect(canViewMatchPlan(viewer, clubOf(league, league.users[3].id).id, 'OPEN')).toBe(true);
   });
 
   it('publishes reports to the league only after the matchday is played', async () => {
@@ -116,8 +116,7 @@ describe('the weekly loop', () => {
     const matchdayId = matchday!.id;
 
     // --- Preparation: every manager sets training and tactics -------------
-    await advancePhase(matchdayId, league.ownerId); // ANALYSIS
-    await advancePhase(matchdayId, league.ownerId); // PREPARATION
+    // No phases to step through: the matchday is open from the moment it opens.
 
     for (const club of league.clubs) {
       const userId = club.ownerUserId!;
@@ -126,7 +125,7 @@ describe('the weekly loop', () => {
 
       await getOrCreateTrainingPlan(club.id, matchdayId);
       await saveTrainingPlan({
-        clubId: club.id, matchdayId, userId, phase: 'PREPARATION',
+        clubId: club.id, matchdayId, userId, phase: 'OPEN',
         plan: {
           primaryFocus: 'FORMATION_FAMILIARITY',
           secondaryFocus: 'MATCH_PREPARATION',
@@ -142,14 +141,10 @@ describe('the weekly loop', () => {
       const tactics = defaultTacticalPlan('F_4_3_3');
       const lineup = autoSelectLineup(toSelectableView(squad), 'F_4_3_3');
       await saveMatchPlan({
-        fixtureId: fixture.id, clubId: club.id, userId, phase: 'PREPARATION',
+        fixtureId: fixture.id, clubId: club.id, userId, phase: 'OPEN',
         plan: { tactics, lineup, notes: '' }, approve: true,
       });
     }
-
-    // --- Submission and review -------------------------------------------
-    await advancePhase(matchdayId, league.ownerId); // TACTICAL_SUBMISSION
-    await advancePhase(matchdayId, league.ownerId); // REVIEW_AND_APPROVAL
 
     let lockStatus = await getLockStatus(matchdayId);
     expect(lockStatus.allLocked).toBe(false);
@@ -159,7 +154,7 @@ describe('the weekly loop', () => {
     for (const club of league.clubs) {
       const fixture = matchday!.fixtures.find(
         (f) => f.homeClubId === club.id || f.awayClubId === club.id)!;
-      await lockMatchPlan(fixture.id, club.id, club.ownerUserId!, 'REVIEW_AND_APPROVAL');
+      await lockMatchPlan(fixture.id, club.id, club.ownerUserId!, 'OPEN');
     }
     lockStatus = await getLockStatus(matchdayId);
     expect(lockStatus.allLocked).toBe(true);
@@ -171,7 +166,7 @@ describe('the weekly loop', () => {
       (f) => f.homeClubId === firstClub.id || f.awayClubId === firstClub.id)!;
     await expect(saveMatchPlan({
       fixtureId: firstFixture.id, clubId: firstClub.id, userId: firstClub.ownerUserId!,
-      phase: 'REVIEW_AND_APPROVAL',
+      phase: 'OPEN',
       plan: {
         tactics: defaultTacticalPlan('F_3_5_2'),
         lineup: autoSelectLineup(toSelectableView(await loadSquad(firstClub.id)), 'F_3_5_2'),
@@ -290,7 +285,7 @@ describe('the weekly loop', () => {
     expect(closed.phase).toBe('COMPLETE');
     const current = await getCurrentMatchday(league.seasonId);
     expect(current?.number).toBe(2);
-    expect(current?.phase).toBe('WEEK_OPEN');
+    expect(current?.phase).toBe('OPEN');
   }, 180_000);
 
   it('refuses to simulate a matchday twice', async () => {
@@ -326,7 +321,7 @@ describe('the weekly loop', () => {
       await getOrCreateMatchPlan(fixture.id, fixture.homeClubId);
       await getOrCreateMatchPlan(fixture.id, fixture.awayClubId);
     }
-    await setPhase(second.id, 'REVIEW_AND_APPROVAL', league.ownerId);
+    await setPhase(second.id, 'OPEN', league.ownerId);
     await advancePhase(second.id, league.ownerId); // LOCKED
 
     const status = await getLockStatus(second.id);

@@ -347,9 +347,10 @@ export function validateTrainingPlan(
 // Phase and authorisation gates
 // ---------------------------------------------------------------------------
 
-const EDITABLE_PHASES: MatchdayPhase[] = [
-  'WEEK_OPEN', 'ANALYSIS', 'PREPARATION', 'TACTICAL_SUBMISSION', 'REVIEW_AND_APPROVAL',
-];
+// A matchday is open for business or it is not. The week used to be split into
+// five phases, but every one of them was listed here, so none of them gated
+// anything: the distinction existed only in the status strip.
+const EDITABLE_PHASES: MatchdayPhase[] = ['OPEN'];
 
 export function canEditPlans(phase: MatchdayPhase, planStatus: PlanStatus): ValidationResult {
   const issues: ValidationIssue[] = [];

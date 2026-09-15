@@ -2,9 +2,15 @@ import { prisma } from '@/lib/db';
 import type { MatchdayPhase } from '@/domain/types';
 import { MATCHDAY_PHASES } from '@/domain/types';
 import { recordAudit } from './audit';
+import { getOrCreateMatchPlan } from './plans';
 
 /**
  * The weekly state machine.
+ *
+ * A matchday is OPEN until every human manager has locked in or the deadline
+ * passes; everything after that is the league resolving itself. There is one
+ * deadline per matchday rather than one per task, because each extra gate is
+ * another place where one slow manager stalls seven other people.
  *
  * Phases move forward one step at a time and never backwards, except by an
  * explicit administrator reopen, which is audited. Every action that changes
@@ -16,11 +22,7 @@ export class MatchdayError extends Error {}
 export const PHASE_ORDER: MatchdayPhase[] = [...MATCHDAY_PHASES];
 
 export const PHASE_LABELS: Record<MatchdayPhase, string> = {
-  WEEK_OPEN: 'Week open',
-  ANALYSIS: 'Analysis',
-  PREPARATION: 'Preparation',
-  TACTICAL_SUBMISSION: 'Tactics',
-  REVIEW_AND_APPROVAL: 'Review and approval',
+  OPEN: 'Open',
   LOCKED: 'Locked',
   SIMULATION: 'Simulating',
   POST_MATCH: 'Post match',
@@ -28,11 +30,7 @@ export const PHASE_LABELS: Record<MatchdayPhase, string> = {
 };
 
 export const PHASE_DESCRIPTIONS: Record<MatchdayPhase, string> = {
-  WEEK_OPEN: 'The new matchday is open. Review your club and your next opponent.',
-  ANALYSIS: 'Study the squad, recent form and what the opposition have been doing.',
-  PREPARATION: 'Set training priorities and work through ideas with your coaching staff.',
-  TACTICAL_SUBMISSION: 'Choose a formation, line-up, roles and instructions.',
-  REVIEW_AND_APPROVAL: 'Check the warnings, approve the plan and lock it in.',
+  OPEN: 'Set your training, shape and side, then lock in. The match plays as soon as every manager has.',
   LOCKED: 'Plans are frozen. Waiting for the rest of the league.',
   SIMULATION: 'Fixtures are being simulated.',
   POST_MATCH: 'Results and reports are published.',
@@ -138,15 +136,25 @@ export async function reopenMatchday(matchdayId: string, userId: string) {
       where: { id: { in: planIds } },
       data: { status: 'APPROVED', lockedAt: null },
     }),
-    prisma.matchday.update({ where: { id: matchdayId }, data: { phase: 'REVIEW_AND_APPROVAL' } }),
+    prisma.matchday.update({ where: { id: matchdayId }, data: { phase: 'OPEN' } }),
   ]);
   await recordAudit({
     action: 'MATCHDAY_REOPENED', entity: 'Matchday', entityId: matchdayId, userId,
-    before: { phase: matchday.phase }, after: { phase: 'REVIEW_AND_APPROVAL' },
+    before: { phase: matchday.phase }, after: { phase: 'OPEN' },
   });
 }
 
+/**
+ * Who the league is still waiting for.
+ *
+ * Only clubs with a human owner count. A club nobody manages has no one to
+ * chase, so counting it would leave every league permanently one lock short
+ * and waiting on an administrator to force the match through. Unowned clubs
+ * are frozen as they stand when the matchday locks, like any plan left
+ * outstanding at the deadline.
+ */
 export interface LockStatus {
+  /** Human-managed clubs in this matchday. */
   total: number;
   locked: number;
   outstanding: Array<{ clubId: string; clubName: string }>;
@@ -161,6 +169,7 @@ export async function getLockStatus(matchdayId: string): Promise<LockStatus> {
   const entries: Array<{ clubId: string; clubName: string; locked: boolean }> = [];
   for (const fixture of fixtures) {
     for (const club of [fixture.homeClub, fixture.awayClub]) {
+      if (!club.ownerUserId) continue;
       const plan = fixture.matchPlans.find((p) => p.clubId === club.id);
       entries.push({ clubId: club.id, clubName: club.name, locked: plan?.status === 'LOCKED' });
     }
@@ -170,7 +179,9 @@ export async function getLockStatus(matchdayId: string): Promise<LockStatus> {
     total: entries.length,
     locked: locked.length,
     outstanding: entries.filter((e) => !e.locked).map(({ clubId, clubName }) => ({ clubId, clubName })),
-    allLocked: entries.length > 0 && locked.length === entries.length,
+    // A matchday with no human managers has nobody to wait for, so it is ready
+    // as soon as it has fixtures at all.
+    allLocked: fixtures.length > 0 && locked.length === entries.length,
   };
 }
 
@@ -181,8 +192,26 @@ export async function getFixtureForClub(matchdayId: string, clubId: string) {
   });
 }
 
-/** Freeze every plan that is not yet locked when the deadline arrives. */
+/**
+ * Freeze every plan that is not yet locked when the deadline arrives.
+ *
+ * A club whose manager never opened the app has no plan row at all, so there is
+ * nothing to freeze and it would go into the match on whatever the simulator
+ * invented for it afterwards. Give those clubs the plan their coaching staff
+ * would have suggested first, then freeze that, so every club goes into the
+ * match on a plan that was settled before kick-off and can be shown afterwards.
+ */
 export async function lockOutstandingPlans(matchdayId: string, userId: string): Promise<number> {
+  const fixtures = await prisma.fixture.findMany({
+    where: { matchdayId },
+    select: { id: true, homeClubId: true, awayClubId: true },
+  });
+  for (const fixture of fixtures) {
+    for (const clubId of [fixture.homeClubId, fixture.awayClubId]) {
+      await getOrCreateMatchPlan(fixture.id, clubId);
+    }
+  }
+
   const plans = await prisma.matchPlan.findMany({
     where: { fixture: { matchdayId }, status: { not: 'LOCKED' } },
     select: { id: true, clubId: true },

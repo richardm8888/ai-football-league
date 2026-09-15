@@ -21,10 +21,12 @@ export default async function ClubPage() {
     return (
       <>
         <PageHeader title="No club yet" subtitle={context.league.name} />
-        <Alert tone="warn" title="You are in the league but do not manage a club">
-          <p>Ask the league administrator to assign you one. Share this invite code with anyone else joining:</p>
-          <p className="mt-2 font-mono text-lg tracking-[0.2em] text-brand-400">{context.league.inviteCode}</p>
+        <Alert tone="warn" title="You are in the league but have not taken a club">
+          <p>Pick the one you fancy: you can see what each is known for and how it is doing.</p>
+          <p className="mt-2">Share this invite code with anyone else joining:</p>
+          <p className="mt-1 font-mono text-lg tracking-[0.2em] text-brand-400">{context.league.inviteCode}</p>
         </Alert>
+        <LinkButton href="/choose-club" className="mt-3">Choose your club</LinkButton>
       </>
     );
   }

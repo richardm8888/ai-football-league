@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { getViewer } from '@/services/auth';
-import { assignClub, startSeason, LeagueError } from '@/services/league';
+import { assignClub, resetSeason, startSeason, LeagueError } from '@/services/league';
 import { advancePhase, MatchdayError, reopenMatchday } from '@/services/matchday';
 import { openNextMatchday, simulateMatchday, SimulationError } from '@/services/simulation';
 import { requireUser } from '@/services/page-context';
@@ -138,6 +138,37 @@ export async function startSeasonAction(
     revalidatePath('/admin');
     revalidatePath('/club');
     return { message: `${result.season.name} created with ${result.clubs.length} clubs and ${result.matchdays} matchdays.` };
+  } catch (error) {
+    if (error instanceof LeagueError) return { error: error.message };
+    throw error;
+  }
+}
+
+/**
+ * Put the league back to day one.
+ *
+ * Interim testing tool: a group needs to walk the opening week more than once
+ * to get it right. Typing the league's name is the confirmation, because this
+ * throws away every result the league has played and cannot be undone.
+ */
+export async function resetSeasonAction(
+  _state: AdminActionState, formData: FormData,
+): Promise<AdminActionState> {
+  const leagueId = String(formData.get('leagueId') ?? '');
+  const confirmation = String(formData.get('confirm') ?? '').trim();
+  try {
+    const user = await requireLeagueAdmin(leagueId);
+    const league = await prisma.league.findUniqueOrThrow({ where: { id: leagueId } });
+    if (confirmation !== league.name) {
+      return { error: `Type the league's name (${league.name}) to confirm the reset.` };
+    }
+    await resetSeason(leagueId, user.id);
+    for (const path of ['/admin', '/club', '/league', '/tactics', '/training', '/match-centre', '/reports', '/squad']) {
+      revalidatePath(path);
+    }
+    return {
+      message: 'League reset to day one. Every club is unclaimed again, so each manager picks one to start.',
+    };
   } catch (error) {
     if (error instanceof LeagueError) return { error: error.message };
     throw error;

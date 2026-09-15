@@ -21,7 +21,7 @@ import {
   loadClubFamiliarity, loadPlayerFamiliarity, loadSquad, saveClubFamiliarity,
   savePlayerFamiliarity, toEngineView, toSelectableView, type SquadPlayer,
 } from './club';
-import { getLockStatus, setPhase } from './matchday';
+import { getLockStatus, lockOutstandingPlans, setPhase } from './matchday';
 import { getOrCreateMatchPlan, getPreviousPlayedPlan, toTacticalInput, toTrainingInput, defaultTrainingPlan } from './plans';
 
 /**
@@ -713,7 +713,7 @@ export async function openNextMatchday(matchdayId: string, userId: string) {
     where: { seasonId: matchday.seasonId, number: matchday.number + 1 },
   });
   if (next) {
-    await prisma.matchday.update({ where: { id: next.id }, data: { phase: 'WEEK_OPEN' } });
+    await prisma.matchday.update({ where: { id: next.id }, data: { phase: 'OPEN' } });
   } else {
     await prisma.season.update({ where: { id: matchday.seasonId }, data: { status: 'COMPLETE' } });
   }
@@ -722,4 +722,34 @@ export async function openNextMatchday(matchdayId: string, userId: string) {
     after: { nextMatchday: next?.number ?? null },
   });
   return next;
+}
+
+/**
+ * Play the matchday the moment the league is ready, rather than waiting for an
+ * administrator to press a button.
+ *
+ * Called after any manager locks in. The league moves at the pace of its
+ * slowest human: if everyone is online and acting, several matchdays can run
+ * in an evening; if one person is away, nothing happens until the deadline
+ * sweeps their plan up. Nobody has to be awake to referee it.
+ *
+ * Returns the summary when it played, or null when the league is still waiting
+ * on someone, which is the ordinary case and not an error.
+ */
+export async function settleMatchdayIfReady(
+  matchdayId: string, userId: string,
+): Promise<SimulationSummary | null> {
+  const matchday = await prisma.matchday.findUnique({ where: { id: matchdayId } });
+  if (!matchday || matchday.phase !== 'OPEN') return null;
+
+  const lockStatus = await getLockStatus(matchdayId);
+  if (!lockStatus.allLocked) return null;
+
+  // Freeze the clubs nobody manages, exactly as the deadline would.
+  await prisma.matchday.update({ where: { id: matchdayId }, data: { phase: 'LOCKED' } });
+  await lockOutstandingPlans(matchdayId, userId);
+
+  const summary = await simulateMatchday(matchdayId, userId);
+  await openNextMatchday(matchdayId, userId);
+  return summary;
 }
