@@ -99,7 +99,9 @@ export function AdminPanel({
                 </SubmitButton>
                 {lockStatus && !lockStatus.allLocked && (
                   <label className="flex items-start gap-3 rounded-xl border border-warn-500/40 bg-warn-500/10 p-3 text-sm">
-                    <input type="checkbox" name="force" value="1" className="mt-0.5 h-5 w-5 accent-[var(--color-warn-500)]" />
+                    {/* Full-size target: this one plays a matchday without every
+                        club having locked in, and it is checked on a phone. */}
+                    <input type="checkbox" name="force" value="1" className="h-11 w-11 shrink-0 accent-[var(--color-warn-500)]" />
                     <span>
                       Play anyway without everyone locked in
                       <span className="mt-0.5 block text-xs text-ink-400">

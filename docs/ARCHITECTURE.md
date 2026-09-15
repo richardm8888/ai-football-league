@@ -136,6 +136,11 @@ same kind of structured proposal. It exists for three reasons: the game must be
 fully playable with no provider account, it is the fallback when a provider
 fails, and it makes the AI workflow testable without a network call.
 
+`vocabulary.ts` is the other half of the local coach: the phrasings the interface
+advertises, kept beside the intents that read them. Every screen that shows a
+manager an example draws from it, and a test puts each one through the coach, so
+the guidance cannot quietly drift from what the parser understands.
+
 `context.ts` is the privacy boundary. It loads the manager's own club in full and
 the opponent only as published results and labelled estimates. An opponent's
 squad, plans, training and conversations are not loaded, so they cannot leak.
@@ -167,6 +172,16 @@ server enforces on save, so warnings about unfamiliar systems, out-of-position
 players and the cost of a tactical change appear while the manager edits. The
 server revalidates regardless.
 
+Every submission reports itself where the control is. The button settles into
+what it did, a line above it says what happened and when, and a refusal appears
+against the control that was refused — none of it in an alert at the top of the
+page, which on a phone is several screens away from the thumb. The settled state
+is derived from a fingerprint of the plan the server stored rather than from a
+timer, so "Saved" cannot outlive the fact it describes.
+
+A first-run walkthrough introduces the weekly loop once per user, recorded as
+`User.tourSeenAt` and reachable afterwards from the help button in the top bar.
+
 The interface is mobile-first in the literal sense: it was built at 320px and
 allowed to grow. Bottom navigation, cards instead of dense tables, tap-to-select
 instead of drag-and-drop, 44px minimum touch targets, and inputs at 16px so iOS
@@ -182,7 +197,7 @@ errors.
 | `tests/engine` | no | Determinism, statistical realism, home advantage, quality, fitness, tactical effects, reporting accuracy |
 | `tests/familiarity` | no | Growth, decay, targeted disruption, change costs, gradual transitions, bounded effect |
 | `tests/ai` | yes | Structured output, rejection of invalid proposals, privacy, inability to touch results, failure fallback, injection, fairness, and that applying an instruction is described and reversible |
-| `tests/e2e` | yes | The complete matchday walk-through against real persistence |
+| `tests/e2e` | yes | The complete matchday walk-through against real persistence, and a manager's first run |
 
 `scripts/calibrate.ts` is a balancing tool rather than a test: it plays 900
 matches and prints the statistical profile against the range each metric should

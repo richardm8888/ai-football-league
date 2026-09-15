@@ -30,6 +30,12 @@ model User {
   isSuperAdmin Boolean  @default(false)
   createdAt    DateTime @default(now())
 
+  // When this manager was shown how the game works. Null means never, which is
+  // what makes the first-run walkthrough run once rather than every week. A
+  // timestamp rather than a flag because "when" is worth knowing and costs the
+  // same.
+  tourSeenAt DateTime?
+
   sessions      Session[]
   memberships   LeagueMembership[]
   ownedLeagues  League[]           @relation("LeagueOwner")

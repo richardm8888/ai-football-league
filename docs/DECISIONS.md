@@ -273,6 +273,82 @@ written down at the end of `docs/DEPLOY.md` rather than left to be discovered.
 Development still uses a container, because there the point of the database is
 that it can be thrown away.
 
+## 20. Feedback belongs beside the button, not at the top of the page
+
+Saving, approving and locking confirm themselves in the bar the button sits in.
+The button itself settles into `Saved ✓`, `Approved ✓` or `Locked`, and the line
+above it says what happened and when.
+
+**Why.** The confirmation already existed. It rendered in an alert near the top
+of the screen, several screens above the control on a phone, so a manager
+pressed Save, saw nothing change, and concluded the app had ignored them. That
+is the same misreading that made the coaching staff look inert, and it has the
+same fix: put the consequence where the person is already looking. A refusal is
+worse again — validation errors scrolled away from the control that caused them,
+leaving a disabled button and no stated reason.
+
+The settled label is driven by what the server says it stored rather than by a
+timer. The action returns a fingerprint of the plan it saved; the editor
+compares it with the plan on screen. So `Saved ✓` means "this exact plan is on
+the server", it survives any re-render, and the moment the manager changes
+anything the button offers a save again and the line says the plan has moved on.
+A timer would have claimed the same thing for three seconds regardless of truth.
+
+Everything in the bar stacks upwards from the buttons. A sticky box can be
+clamped to the top of its containing block — which happens when one of the
+folded-away editors is opened while the page is at the top — and anything
+rendered below the buttons is then the part that ends up underneath the bottom
+navigation.
+
+## 21. The coach screen says what it understands
+
+A collapsible "What you can ask for" panel lists the vocabulary by what it
+affects, with a tappable example of each, and it stays reachable for the whole
+conversation rather than only before the first message.
+
+**Why.** Instructing the staff is now the primary way to manage a club, and it
+opens on an empty text box. Five suggested openers hint at what to say; they do
+not answer what the staff can do, which is considerably more than a manager
+would guess: shape, style, pressing, defensive line, build-up, width, tempo,
+risk, set pieces, who plays, who is rested, and the week on the training ground.
+
+The examples live in `src/ai/vocabulary.ts`, next to the provider whose intents
+they describe, and every screen that advertises a phrase — the coach panel, the
+openers, and the "Tell your staff" cards on tactics and training — draws from
+that one list. `tests/ai/vocabulary.test.ts` puts each phrase through the coach
+and fails if one stops registering or stops producing a valid proposal. Guidance
+that drifts from the parser teaches managers phrasings the staff shrug at, and
+nothing about that failure is visible until someone loses a week to it.
+
+Two things came out of writing the copy against the code. The panel states
+outright that clauses about the opposition are context rather than instructions,
+because "they press aggressively" reads as a fact about them and a manager who
+does not know that gets the opposite of what they asked for. And the local coach
+gained the training intents it was already being credited with — working on
+playing out from the back, a light week, a hard one — because the alternative
+was advertising something only the hosted provider could actually do.
+
+## 22. The walkthrough runs once, and never nags
+
+A six-card first-run tour covers the shape of a week, the deadline, what the
+staff understand, familiarity, and where the manual editors are. It is stored
+per user as a timestamp and can be reopened from the help button in the top bar.
+
+**Why.** None of that is discoverable by poking at the interface. The weekly
+loop only announces itself once it has been missed, and the deadline only
+announces itself by having passed — which in a private league of eight friends
+means a manager fields whatever they had and stops playing.
+
+The rule it lives by is that it is the only thing in the game allowed to
+interrupt a manager, so it gets one turn. Any dismissal counts, including the
+escape key, and `tourSeenAt` is written once and never unset. Because the write
+takes a moment to land, the browser also remembers the dismissal locally, so a
+manager who closes it and immediately reloads is not shown it twice.
+
+It renders through a portal. The top bar it is launched from has a backdrop
+filter, which would otherwise become the containing block for anything fixed
+inside it and trap the dialog inside the header.
+
 ## Known limitations
 
 - **Squad depth is fixed at 20 players.** Enough for rotation and injuries;

@@ -15,6 +15,8 @@ import {
   PLAYING_STYLES, PRESSING_INTENSITIES, RISK_TOLERANCES, SET_PIECE_APPROACHES, TEMPOS, WIDTHS,
 } from '@/domain/types';
 import type { Formation, PlayerRole } from '@/domain/types';
+import { fingerprint } from '@/lib/fingerprint';
+import { ActionBar, ActionNote, ActionSubmit, atTime } from './action-bar';
 import { Pitch } from './pitch';
 import { Alert, Badge, Card, CardTitle, ChipRow, Empty, Field, humanise, inputClass, Meter } from './ui';
 import type { EditorPlayer, TacticsEditorProps } from './tactics-editor-types';
@@ -151,12 +153,21 @@ export function TacticsEditor(props: TacticsEditorProps) {
   }
 
   const planJson = JSON.stringify({ tactics, lineup, notes: '' });
-  const message = saveState.message ?? lockState.message;
   const error = saveState.error ?? lockState.error;
   const serverIssues = [
     ...(saveState.validation?.errors ?? []),
     ...(lockState.validation?.errors ?? []),
   ];
+
+  // Settled state, read from what the server said it stored rather than from a
+  // timer: the button says Saved for exactly as long as the plan on screen is
+  // the plan that was saved, and goes back to offering a save the moment the
+  // manager changes something.
+  const saved = saveState.outcome;
+  const unchangedSinceSave = saved?.plan !== undefined && saved.plan === fingerprint(planJson);
+  const savedNow = saved?.kind === 'SAVED' && unchangedSinceSave;
+  const approvedNow = saved?.kind === 'APPROVED' && unchangedSinceSave;
+  const locked = props.planStatus === 'LOCKED' || lockState.outcome?.kind === 'LOCKED';
 
   // A locked or closed plan is not the manager's problem to fix; the warnings
   // below only apply while they can still act on them.
@@ -174,17 +185,6 @@ export function TacticsEditor(props: TacticsEditorProps) {
           This matchday has moved past the point where plans can be edited.
         </Alert>
       )}
-      {message && <Alert tone="good">{message}</Alert>}
-      {error && (
-        <Alert tone="bad" title={error}>
-          {serverIssues.length > 0 && (
-            <ul className="list-disc pl-4">
-              {serverIssues.map((issue, i) => <li key={i}>{issue.message}</li>)}
-            </ul>
-          )}
-        </Alert>
-      )}
-
       <ChipRow>
         {TABS.map((item) => (
           <button
@@ -290,56 +290,89 @@ export function TacticsEditor(props: TacticsEditorProps) {
         />
       )}
 
-      {/* Submission. Approving and locking are separate deliberate steps. */}
-      <div className="sticky bottom-[4.75rem] z-20 -mx-4 border-t border-line-700/60 bg-pitch-950/95 px-4 py-3 backdrop-blur">
+      {/* Submission. Approving and locking are separate deliberate steps, and
+          each says what it did without the manager having to scroll for it. */}
+      <ActionBar>
+        {showValidation && !validation.ok && (
+          <ActionNote tone="bad" className="mb-2">
+            {validation.errors.length} problem{validation.errors.length === 1 ? '' : 's'} to fix before submitting. See Review.
+          </ActionNote>
+        )}
+
+        {error ? (
+          <ActionNote tone="bad" className="mb-2">
+            {error}
+            {serverIssues.length > 0 && ` ${serverIssues.map((issue) => issue.message).join(' ')}`}
+          </ActionNote>
+        ) : locked ? (
+          <ActionNote tone="good" className="mb-2">
+            Locked in. Your side is committed for this matchday.
+          </ActionNote>
+        ) : saved ? (
+          <ActionNote tone={unchangedSinceSave ? 'good' : 'warn'} className="mb-2">
+            {saved.kind === 'APPROVED' ? 'Plan approved' : 'Draft saved'} {atTime(saved.at)}
+            {!unchangedSinceSave && ' · you have changed something since'}
+          </ActionNote>
+        ) : null}
+
         <div className="flex flex-wrap gap-2">
           <form action={saveAction} className="flex-1">
             <input type="hidden" name="fixtureId" value={props.fixtureId} />
             <input type="hidden" name="clubId" value={props.clubId} />
             <input type="hidden" name="plan" value={planJson} />
-            <SaveButtons disabled={disabled || !validation.ok} />
+            <SaveButtons
+              disabled={disabled || !validation.ok}
+              saved={savedNow}
+              approved={approvedNow}
+            />
           </form>
           <form action={lockAction}>
             <input type="hidden" name="fixtureId" value={props.fixtureId} />
             <input type="hidden" name="clubId" value={props.clubId} />
-            <button
-              type="submit"
-              disabled={!props.lockable || props.planStatus === 'LOCKED' || !validation.ok}
-              className="min-h-11 rounded-xl bg-brand-600 px-4 font-semibold text-pitch-950 disabled:opacity-40"
+            <ActionSubmit
+              pendingLabel="Locking…"
+              disabled={!props.lockable || locked || !validation.ok}
+              className={`min-h-11 rounded-xl px-4 font-semibold disabled:opacity-40 ${
+                locked ? 'border border-brand-600/50 bg-brand-600/20 text-brand-400' : 'bg-brand-600 text-pitch-950'
+              }`}
             >
-              {props.planStatus === 'LOCKED' ? 'Locked' : 'Lock in'}
-            </button>
+              {locked ? 'Locked' : 'Lock in'}
+            </ActionSubmit>
           </form>
         </div>
-        {showValidation && !validation.ok && (
-          <p className="mt-2 text-xs text-danger-400">
-            {validation.errors.length} problem{validation.errors.length === 1 ? '' : 's'} to fix before submitting. See Review.
-          </p>
-        )}
-      </div>
+
+      </ActionBar>
     </div>
   );
 }
 
-function SaveButtons({ disabled }: { disabled: boolean }) {
+function SaveButtons({
+  disabled, saved, approved,
+}: { disabled: boolean; saved: boolean; approved: boolean }) {
   return (
     <div className="flex gap-2">
-      <button
-        type="submit"
+      <ActionSubmit
+        name="approve"
+        value="0"
+        pendingLabel="Saving…"
+        settled={saved}
+        settledLabel="Saved ✓"
         disabled={disabled}
         className="min-h-11 flex-1 rounded-xl border border-line-700 bg-pitch-800 px-4 text-ink-50 disabled:opacity-40"
       >
         Save draft
-      </button>
-      <button
-        type="submit"
+      </ActionSubmit>
+      <ActionSubmit
         name="approve"
         value="1"
+        pendingLabel="Approving…"
+        settled={approved}
+        settledLabel="Approved ✓"
         disabled={disabled}
         className="min-h-11 flex-1 rounded-xl border border-brand-600/50 bg-brand-600/20 px-4 font-semibold text-brand-400 disabled:opacity-40"
       >
         Approve
-      </button>
+      </ActionSubmit>
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
+import { fingerprint } from '@/lib/fingerprint';
 import type { MatchdayPhase } from '@/domain/types';
 import type { ValidationResult } from '@/domain/validation';
 import { canManageClub } from '@/domain/visibility';
@@ -21,6 +22,18 @@ export interface PlanActionState {
   error?: string;
   message?: string;
   validation?: ValidationResult;
+  /**
+   * What the submission actually did, for the control that did it.
+   *
+   * `plan` is the fingerprint of the plan that was stored, so an editor can
+   * tell "saved, and this is still it" from "saved, and then you changed
+   * something" without keeping its own bookkeeping or running a timer.
+   */
+  outcome?: {
+    kind: 'SAVED' | 'APPROVED' | 'LOCKED';
+    at: string;
+    plan?: string;
+  };
 }
 
 async function authoriseClub(clubId: string) {
@@ -45,10 +58,11 @@ export async function saveMatchPlanAction(
   const fixtureId = String(formData.get('fixtureId') ?? '');
   const clubId = String(formData.get('clubId') ?? '');
   const approve = formData.get('approve') === '1';
+  const planJson = String(formData.get('plan') ?? '{}');
 
   try {
     const user = await authoriseClub(clubId);
-    const plan = JSON.parse(String(formData.get('plan') ?? '{}'));
+    const plan = JSON.parse(planJson);
     await saveMatchPlan({
       fixtureId, clubId, userId: user.id,
       phase: await phaseForFixture(fixtureId),
@@ -60,7 +74,14 @@ export async function saveMatchPlanAction(
   }
   revalidatePath('/tactics');
   revalidatePath('/club');
-  return { message: approve ? 'Plan approved. Lock it in when you are ready.' : 'Draft saved.' };
+  return {
+    message: approve ? 'Plan approved. Lock it in when you are ready.' : 'Draft saved.',
+    outcome: {
+      kind: approve ? 'APPROVED' : 'SAVED',
+      at: new Date().toISOString(),
+      plan: fingerprint(planJson),
+    },
+  };
 }
 
 export async function lockMatchPlanAction(
@@ -77,7 +98,10 @@ export async function lockMatchPlanAction(
   }
   revalidatePath('/tactics');
   revalidatePath('/club');
-  return { message: 'Locked in. Your plan is frozen until the matchday is simulated.' };
+  return {
+    message: 'Locked in. Your plan is frozen until the matchday is simulated.',
+    outcome: { kind: 'LOCKED', at: new Date().toISOString() },
+  };
 }
 
 export async function saveTrainingPlanAction(
@@ -86,13 +110,14 @@ export async function saveTrainingPlanAction(
   const clubId = String(formData.get('clubId') ?? '');
   const matchdayId = String(formData.get('matchdayId') ?? '');
   const approve = formData.get('approve') === '1';
+  const planJson = String(formData.get('plan') ?? '{}');
   try {
     const user = await authoriseClub(clubId);
     const matchday = await prisma.matchday.findUniqueOrThrow({ where: { id: matchdayId } });
     await saveTrainingPlan({
       clubId, matchdayId, userId: user.id,
       phase: matchday.phase as MatchdayPhase,
-      plan: JSON.parse(String(formData.get('plan') ?? '{}')),
+      plan: JSON.parse(planJson),
       approve,
       source: formData.get('source') === 'AI_ASSISTED' ? 'AI_ASSISTED' : 'MANUAL',
     });
@@ -102,5 +127,12 @@ export async function saveTrainingPlanAction(
   }
   revalidatePath('/training');
   revalidatePath('/club');
-  return { message: approve ? 'Training approved.' : 'Training draft saved.' };
+  return {
+    message: approve ? 'Training approved.' : 'Training draft saved.',
+    outcome: {
+      kind: approve ? 'APPROVED' : 'SAVED',
+      at: new Date().toISOString(),
+      plan: fingerprint(planJson),
+    },
+  };
 }

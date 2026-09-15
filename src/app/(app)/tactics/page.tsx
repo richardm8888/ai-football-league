@@ -4,6 +4,7 @@ import { requireClubContext } from '@/services/page-context';
 import { canEditPlans, canLockPlan } from '@/domain/validation';
 import { TacticsEditor } from '@/components/tactics-editor';
 import type { EditorPlayer } from '@/components/tactics-editor-types';
+import { topicExamples } from '@/ai/vocabulary';
 import { Alert, CoachFirst, ManualOverride, PageHeader } from '@/components/ui';
 
 export const dynamic = 'force-dynamic';
@@ -56,11 +57,7 @@ export default async function TacticsPage() {
       />
       <CoachFirst
         what="Describe how you want to play and who should be in the side. Your staff pick the eleven, the shape and the instructions, and tell you what they changed."
-        examples={[
-          'Play three at the back and get our wing-backs high up the pitch.',
-          'Rest Hana, she is not fully fit. Bring in whoever is sharpest.',
-          'Sit deeper and hit them on the counter.',
-        ]}
+        examples={[...topicExamples('shape', 2), ...topicExamples('selection', 1)]}
       />
 
       <ManualOverride label="Set it manually instead">

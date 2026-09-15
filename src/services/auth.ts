@@ -107,6 +107,8 @@ export interface CurrentUser {
   email: string;
   displayName: string;
   isSuperAdmin: boolean;
+  /** Null until this manager has been shown how a week works. */
+  tourSeenAt: Date | null;
 }
 
 export async function getCurrentUser(): Promise<CurrentUser | null> {
@@ -123,6 +125,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     email: session.user.email,
     displayName: session.user.displayName,
     isSuperAdmin: session.user.isSuperAdmin,
+    tourSeenAt: session.user.tourSeenAt,
   };
 }
 
@@ -146,4 +149,18 @@ export async function getViewer(userId: string): Promise<Viewer> {
     isLeagueAdmin: memberships.some((m) => m.role === 'OWNER' || m.role === 'ADMIN'),
     isSuperAdmin: user?.isSuperAdmin ?? false,
   };
+}
+
+/**
+ * Record that this manager has been shown around.
+ *
+ * Written once and never unset: the walkthrough is an introduction, not a
+ * reminder, and a manager who has seen it should never be shown it again
+ * without asking for it.
+ */
+export async function markTourSeen(userId: string): Promise<void> {
+  await prisma.user.updateMany({
+    where: { id: userId, tourSeenAt: null },
+    data: { tourSeenAt: new Date() },
+  });
 }
