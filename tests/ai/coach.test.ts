@@ -177,17 +177,30 @@ describe('invalid proposals are rejected, not applied', () => {
 
 describe('the coaching staff cannot reach another club', () => {
   it('loads no opponent squad, plan, training or conversation', async () => {
-    const opponentClub = league.clubs.find((c) => c.id !== clubId)!;
-    const opponentSquad = await loadSquad(opponentClub.id);
+    const ourPlayers = await loadSquad(clubId);
+    // Every other club in the league, not just one of them: the squad most
+    // likely to leak is the one belonging to this week's fixture opponent, and
+    // sampling a single arbitrary club can miss it.
+    const theirPlayers = (await Promise.all(
+      league.clubs.filter((c) => c.id !== clubId).map((c) => loadSquad(c.id)),
+    )).flat();
     const context = await buildCoachContext(clubId);
 
+    // An id is what proves the boundary held: ids are cuids, so another club's
+    // id appearing here could only have come from that club's squad.
+    // A name proves nothing on its own. Every club draws from one shared pool of
+    // first names and surnames, so two clubs can field players with the same
+    // full name by chance, and our own squad legitimately puts its names in the
+    // context. Asserting on a shared name would fail on the luck of the draw
+    // rather than on a leak, so only names unique to the other club are checked.
+    const ourNames = new Set(ourPlayers.map((p) => p.name));
     const serialised = JSON.stringify(context);
-    for (const player of opponentSquad) {
+    for (const player of theirPlayers) {
       expect(serialised).not.toContain(player.id);
-      expect(serialised).not.toContain(player.name);
+      if (!ourNames.has(player.name)) expect(serialised).not.toContain(player.name);
     }
     // Every player the context does mention belongs to this club.
-    const ourSquad = new Set((await loadSquad(clubId)).map((p) => p.id));
+    const ourSquad = new Set(ourPlayers.map((p) => p.id));
     for (const player of context.squad) expect(ourSquad.has(player.id)).toBe(true);
   });
 
