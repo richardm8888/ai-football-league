@@ -33,8 +33,24 @@ say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 git fetch --quiet origin
 git checkout --quiet --detach "$SHA"
 
+# Images are tagged with the full 40-character SHA. A human deploying by hand
+# naturally types a short one, which would write a TAG that no image answers
+# to — discovered only later, when a rollback tries to pull it and fails.
+SHA="$(git rev-parse HEAD)"
+
+env_value() {
+    # .env is read by compose, which understands quoting and inline comments.
+    # grep | cut does not: APP_PORT="3007" arrives with its quotes attached,
+    # and a URL built from that is rejected before a request is ever made.
+    sed -n "s/^$1=//p" .env 2>/dev/null | tail -n 1 | sed \
+        -e 's/\r$//' \
+        -e 's/[[:space:]]\{1,\}#.*$//' \
+        -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+        -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
+}
+
 # Whatever is running now, so a failed deploy has somewhere to go back to.
-PREVIOUS="$(grep -E '^TAG=' .env 2>/dev/null | cut -d= -f2- || true)"
+PREVIOUS="$(env_value TAG)"
 PREVIOUS="${PREVIOUS:-latest}"
 
 set_tag() {
@@ -60,8 +76,11 @@ health_ok() {
     [ -n "$id" ] || return 1
     [ "$(docker inspect -f '{{.State.Health.Status}}' "$id" 2>/dev/null)" = 'healthy' ] || return 1
 
-    port="$(grep -E '^APP_PORT=' .env 2>/dev/null | cut -d= -f2- || true)"
-    port="${port:-3000}"
+    # Asked of Docker rather than re-derived from .env, so this agrees with
+    # what is actually published however the port was configured.
+    port="$("${COMPOSE[@]}" port app 3000 2>/dev/null || true)"
+    port="${port##*:}"
+    [ -n "$port" ] || port=3000
 
     # -f so a 503 from the health route counts as unhealthy rather than as a
     # page successfully fetched.
@@ -83,9 +102,16 @@ roll_back() {
     say "Deploy failed — rolling back to $PREVIOUS"
     set_tag "$PREVIOUS"
 
-    # The previous image is still on disk, so this needs no registry and works
-    # even when the registry is why the deploy failed.
-    "${COMPOSE[@]}" up -d --no-build --remove-orphans
+    # Normally the previous image is still on disk, so this needs no registry
+    # and works even when the registry is why the deploy failed. If .env names
+    # a tag that was never published, it is not, and `up` fails here — which
+    # under `set -e` would kill the script before it could say so.
+    if ! "${COMPOSE[@]}" up -d --no-build --remove-orphans; then
+        echo "ROLLBACK FAILED — could not start the previous build ($PREVIOUS)." >&2
+        echo "Whatever was serving before this deploy may still be up; check the site." >&2
+        echo "Deploy a known-good commit explicitly: ./deploy/deploy.sh <full-sha>" >&2
+        exit 1
+    fi
 
     if wait_for_health; then
         echo "Rolled back and healthy. The league is up on the previous build."
