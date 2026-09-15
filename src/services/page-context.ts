@@ -121,6 +121,8 @@ export async function loadPageContext(): Promise<PageContext> {
 /** Fail closed: a page that asks for a club must have one this user manages. */
 export async function requireClubContext(): Promise<PageContext & { club: NonNullable<PageContext['club']> }> {
   const context = await loadPageContext();
-  if (!context.club) redirect('/club');
+  // Somebody in the league who has not taken a club yet is not lost: they are
+  // one step short of playing, so send them to the step rather than an error.
+  if (!context.club) redirect('/choose-club');
   return context as PageContext & { club: NonNullable<PageContext['club']> };
 }

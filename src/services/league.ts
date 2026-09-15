@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { prisma } from '@/lib/db';
 import { generateDoubleRoundRobin, matchdayCount } from '@/domain/generation/fixtures';
+import { buildTable, type PlayedFixture } from '@/domain/league/standings';
 import { CLUB_SEEDS, COACH_NAMES, COACH_PERSONAS } from '@/domain/generation/names';
 import { generateSquad } from '@/domain/generation/squad';
 import { UNTRAINED_FAMILIARITY } from '@/domain/familiarity';
@@ -51,12 +52,8 @@ export async function joinLeague(userId: string, inviteCode: string) {
     await prisma.leagueMembership.create({ data: { leagueId: league.id, userId, role: 'MANAGER' } });
   }
 
-  // Hand the new manager the first unclaimed club, if the season has started.
-  const unclaimed = league.clubs.find((c) => c.ownerUserId === null);
-  if (unclaimed) {
-    await prisma.club.update({ where: { id: unclaimed.id }, data: { ownerUserId: userId } });
-    await recordAudit({ action: 'CLUB_ASSIGNED', entity: 'Club', entityId: unclaimed.id, leagueId: league.id, clubId: unclaimed.id, userId });
-  }
+  // No club is handed out here. Which club you take is a decision worth making
+  // on what every manager can see about them, so it belongs to the manager.
   await recordAudit({ action: 'LEAGUE_JOINED', entity: 'League', entityId: league.id, leagueId: league.id, userId });
   return league;
 }
@@ -339,4 +336,110 @@ export async function resetSeason(leagueId: string, userId: string) {
     after: { seasonId: season.id, clubs: clubIds.length, players: players.length },
   });
   return season;
+}
+
+/**
+ * The clubs on offer, described only by what every manager can already see.
+ *
+ * Choosing a club is a real decision, so it needs real information: what the
+ * club is known for, how well thought of it is, and how it is actually doing.
+ * Deliberately nothing else. A squad list here would hand whoever picks last a
+ * scouting report on everyone else, which is the one thing the game is built
+ * not to allow.
+ *
+ * Clubs already taken are returned too, marked unavailable: you are choosing a
+ * club in a league, and which of them are spoken for is part of the picture.
+ */
+export interface ClubChoice {
+  id: string;
+  name: string;
+  nickname: string | null;
+  stadium: string | null;
+  primaryColor: string;
+  reputation: number;
+  /** The club's stated style of play, which it is publicly known for. */
+  identity: string;
+  position: number | null;
+  played: number;
+  points: number;
+  formGuide: string;
+  available: boolean;
+}
+
+export async function listClubChoices(leagueId: string): Promise<ClubChoice[]> {
+  const clubs = await prisma.club.findMany({
+    where: { leagueId },
+    include: { aiManager: true },
+    orderBy: { name: 'asc' },
+  });
+  if (clubs.length === 0) return [];
+
+  const season = await prisma.season.findFirst({
+    where: { leagueId, status: 'ACTIVE' },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  const played: PlayedFixture[] = season
+    ? (await prisma.fixture.findMany({
+      where: { seasonId: season.id, match: { isNot: null } },
+      include: { match: true, matchday: true },
+    })).map((f) => ({
+      matchdayNumber: f.matchday.number,
+      homeClubId: f.homeClubId,
+      awayClubId: f.awayClubId,
+      homeGoals: f.match!.homeGoals,
+      awayGoals: f.match!.awayGoals,
+    }))
+    : [];
+
+  const table = buildTable(clubs.map((c) => c.id), played);
+
+  return clubs.map((club) => {
+    const row = table.find((r) => r.clubId === club.id);
+    return {
+      id: club.id,
+      name: club.name,
+      nickname: club.nickname,
+      stadium: club.stadium,
+      primaryColor: club.primaryColor,
+      reputation: club.reputation,
+      identity: club.aiManager?.philosophy ?? '',
+      // Before a ball is kicked every club sits on nought points, so a league
+      // position would be an artefact of the sort order rather than a fact.
+      position: played.length > 0 && row ? row.position : null,
+      played: row?.played ?? 0,
+      points: row?.points ?? 0,
+      formGuide: row?.formGuide ?? '',
+      available: club.ownerUserId === null,
+    };
+  });
+}
+
+/** Take an unclaimed club. One club per manager per league. */
+export async function claimClub(leagueId: string, clubId: string, userId: string) {
+  const membership = await prisma.leagueMembership.findUnique({
+    where: { leagueId_userId: { leagueId, userId } },
+  });
+  if (!membership) throw new LeagueError('You are not a member of this league.');
+
+  const existing = await prisma.club.findFirst({ where: { leagueId, ownerUserId: userId } });
+  if (existing) throw new LeagueError(`You already manage ${existing.name}.`);
+
+  const club = await prisma.club.findFirst({ where: { id: clubId, leagueId } });
+  if (!club) throw new LeagueError('That club is not in this league.');
+  if (club.ownerUserId) throw new LeagueError(`${club.name} has already been taken.`);
+
+  // Claim it only if it is still free when the write lands: two managers can
+  // be looking at the same list at the same time, and the loser of that race
+  // should be told rather than quietly made a co-owner.
+  const claimed = await prisma.club.updateMany({
+    where: { id: clubId, leagueId, ownerUserId: null },
+    data: { ownerUserId: userId },
+  });
+  if (claimed.count === 0) throw new LeagueError(`${club.name} has just been taken by someone else.`);
+
+  await recordAudit({
+    action: 'CLUB_CLAIMED', entity: 'Club', entityId: clubId, leagueId, clubId, userId,
+  });
+  return club;
 }
