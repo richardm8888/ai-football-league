@@ -1,0 +1,42 @@
+# The droplet.
+#
+# One container. The database is DigitalOcean managed Postgres, reached over
+# the network, so nothing here runs or stores it: backups, upgrades and
+# failover are the platform's problem rather than a volume on a single box
+# whose loss would end the league.
+#
+# Nothing is built here either. APP_IMAGE and TAG are set in .env and rewritten
+# by every deploy, so the box only ever downloads an image GitHub already
+# built. See docs/DEPLOY.md.
+#
+#   docker compose -f docker-compose.prod.yml up -d
+
+services:
+  app:
+    image: ${APP_IMAGE:?set APP_IMAGE, e.g. ghcr.io/richardm8888/ai-football-league}:${TAG:-latest}
+    restart: unless-stopped
+    environment:
+      # The managed cluster's connection string, including ?sslmode=require.
+      # It is set once on the droplet and never travels through CI.
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL to the managed Postgres connection string}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET, e.g. openssl rand -hex 32}
+      AI_PROVIDER: ${AI_PROVIDER:-anthropic}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-claude-sonnet-5}
+      ALLOW_OPEN_REGISTRATION: ${ALLOW_OPEN_REGISTRATION:-0}
+      NODE_ENV: production
+    ports:
+      # Bind to the loopback when a reverse proxy terminates TLS in front of
+      # this, which is the arrangement you want for anything public:
+      #   APP_BIND=127.0.0.1
+      - '${APP_BIND:-0.0.0.0}:${APP_PORT:-3000}:3000'
+    healthcheck:
+      # /api/health does a real query, so this proves the app is serving and
+      # can reach the managed cluster. Docker's own view of "running" proves
+      # neither, and a container happily running against an unreachable
+      # database is exactly the failure this has to catch.
+      test: ['CMD-SHELL', 'wget -q -O - http://127.0.0.1:3000/api/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s

@@ -189,6 +189,40 @@ of them look fine on a laptop and are wrong on a phone. Three real defects were
 found and fixed this way, including a grid that pushed the reports page 52px
 sideways on a 320px screen.
 
+## 16. A deploy proves the app works, not that it started
+
+The droplet keeps a build only if `/api/health` answers on the published port,
+and that endpoint runs a real query rather than returning a constant.
+
+**Why.** The failure worth catching is not a container that will not start —
+that one is obvious. It is a container that starts, serves pages, and cannot
+reach the database, which looks healthy from every angle except the only one
+that matters. Checking Docker's view alone would report it as fine. A deploy
+that cannot tell those apart will eventually report success on a dead site.
+
+The same reasoning produced `DEPLOY-COMPLETE`: an exit code cannot distinguish a
+finished deploy from one that stopped early on a successful command, so the
+script prints a line last and the workflow fails without it. That is not
+hypothetical — it is the shape of a bug that left a sister project reporting
+successful deploys while serving the previous build for days.
+
+## 17. Managed Postgres, and no database on the droplet
+
+Production runs `docker-compose.prod.yml`, which has one service in it.
+
+**Why.** A database in a container on the same box is one volume away from
+ending the league, and nothing about eight managers justifies operating it by
+hand. Managed Postgres moves backups, point-in-time restore and upgrades to
+somebody whose job that is. It also makes the droplet disposable: it holds no
+state, so rebuilding it is an afternoon rather than a recovery.
+
+**Cost.** Two compose files instead of one, and a rollback that no longer
+restores the database along with the code. The second is the real one, and it is
+written down at the end of `docs/DEPLOY.md` rather than left to be discovered.
+
+Development still uses a container, because there the point of the database is
+that it can be thrown away.
+
 ## Known limitations
 
 - **Squad depth is fixed at 20 players.** Enough for rotation and injuries;

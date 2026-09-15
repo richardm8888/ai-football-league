@@ -1,0 +1,69 @@
+name: CI
+
+# A red build never becomes a deploy. "Publish image" calls this workflow and
+# will not build unless it passes, so the gate is a job dependency rather than
+# a convention — there is no path from a failing test to a running container.
+#
+# It is not also triggered on push: pushes to the deployable branches run it
+# through that call, and running it twice for one commit buys nothing.
+
+on:
+  # main is excluded because "Publish image" calls this workflow on every push
+  # there. Running it on the push as well would test the same commit twice.
+  push:
+    branches-ignore: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  # A branch pushed several times in a row only needs its newest commit tested.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Type-check and test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: aifl
+          POSTGRES_PASSWORD: aifl
+          POSTGRES_DB: aifl_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql://aifl:aifl@127.0.0.1:5432/aifl_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # There is no postinstall hook, and both the type-check and the suite
+      # import the generated client.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Type-check
+        run: npm run typecheck
+
+      # The suite migrates the test database itself in its global setup, so
+      # nothing needs applying here.
+      - name: Test
+        run: npm test

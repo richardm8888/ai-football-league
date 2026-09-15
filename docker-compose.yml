@@ -1,10 +1,12 @@
 # Local development stack.
 #
 #   docker compose up -d db     # just the database, run the app with npm run dev
-#   docker compose up           # database and app together
+#   docker compose up           # database and app together, built locally
 #
-# The app service is intended for a small private deployment: one container, one
-# database, no orchestration. That is the right size for a league of eight.
+# Production does not use this file. The droplet runs docker-compose.prod.yml,
+# which pulls a prebuilt image and talks to managed Postgres — see
+# docs/DEPLOY.md. Keeping the two apart means development can have a throwaway
+# database in a container without that arrangement ever reaching a server.
 
 services:
   db:
@@ -15,7 +17,9 @@ services:
       POSTGRES_PASSWORD: aifl
       POSTGRES_DB: aifl
     ports:
-      - '5432:5432'
+      # Loopback only. The credentials above are development credentials, and
+      # binding them to every interface is how they stop being harmless.
+      - '127.0.0.1:5432:5432'
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
@@ -40,8 +44,13 @@ services:
       NODE_ENV: production
     ports:
       - '3000:3000'
-    # Migrations run on boot so a deploy is a single command.
     command: sh -c "npx prisma migrate deploy && node server.js"
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O - http://127.0.0.1:3000/api/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
 
 volumes:
   db-data:
