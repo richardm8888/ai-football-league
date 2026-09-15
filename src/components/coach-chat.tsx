@@ -3,7 +3,8 @@
 import { useActionState, useEffect, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
 import {
-  applyProposalAction, askCoachAction, rejectProposalAction, type CoachActionState,
+  applyProposalAction, askCoachAction, rejectProposalAction, undoChangeAction,
+  type CoachActionState,
 } from '@/app/actions/coach';
 import { Alert, Badge, Card, ChipRow, Empty, humanise } from './ui';
 
@@ -60,6 +61,7 @@ export function CoachChat({
   const [askState, askAction] = useActionState(askCoachAction, {} as CoachActionState);
   const [applyState, applyAction] = useActionState(applyProposalAction, {} as CoachActionState);
   const [rejectState, rejectAction] = useActionState(rejectProposalAction, {} as CoachActionState);
+  const [undoState, undoAction] = useActionState(undoChangeAction, {} as CoachActionState);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -67,8 +69,12 @@ export function CoachChat({
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages.length]);
 
-  const notice = askState.message ?? applyState.message ?? rejectState.message;
-  const error = askState.error ?? applyState.error ?? rejectState.error;
+  const notice = askState.message ?? applyState.message ?? rejectState.message ?? undoState.message;
+  const error = askState.error ?? applyState.error ?? rejectState.error ?? undoState.error;
+
+  // What the last instruction actually changed. Shown because the staff act on
+  // sight now: the manager has to be able to check their reading of it.
+  const applied = askState.applied ?? applyState.applied;
 
   return (
     <div className="space-y-4">
@@ -79,8 +85,9 @@ export function CoachChat({
             <p className="font-semibold">{coachName}</p>
             <p className="mt-0.5 text-xs text-ink-400">{coachPersona}</p>
             <p className="mt-1.5 text-[11px] text-ink-500">
-              Running on {providerLabel}. Your staff advise and translate; you decide, and nothing
-              changes until you approve it.
+              Running on {providerLabel}. Tell them what you want and they will set it up — your
+              instruction is the decision. Every change is listed so you can check it, and one tap
+              puts it back. Nothing counts until you lock in before the deadline.
             </p>
           </div>
         </div>
@@ -89,10 +96,48 @@ export function CoachChat({
       {notice && <Alert tone="good">{notice}</Alert>}
       {error && <Alert tone="warn" title="The coaching staff had a problem">{error}</Alert>}
 
+      {applied && (
+        <Card>
+          <p className="mb-2 text-sm font-semibold uppercase tracking-wide text-brand-400">
+            Done — this is now your plan
+          </p>
+          {applied.changes.length > 0 ? (
+            <ul className="space-y-1 text-sm text-ink-200">
+              {applied.changes.map((line, i) => (
+                <li key={i} className="flex gap-2">
+                  <span aria-hidden="true" className="text-brand-400">·</span>
+                  <span>{line}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-ink-300">
+              Nothing moved — your plan already said that.
+            </p>
+          )}
+
+          {applied.warnings.length > 0 && (
+            <ul className="mt-2 list-disc space-y-0.5 pl-4 text-xs text-warn-400">
+              {applied.warnings.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+          )}
+
+          <form action={undoAction} className="mt-3">
+            <input type="hidden" name="decisionIds" value={applied.decisionIds.join(',')} />
+            <button
+              type="submit"
+              className="min-h-11 rounded-xl border border-line-700 px-4 text-sm text-ink-200"
+            >
+              Undo this
+            </button>
+          </form>
+        </Card>
+      )}
+
       {decisions.length > 0 && (
         <Card>
           <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink-400">
-            Waiting for your decision
+            Could not be applied
           </p>
           <ul className="space-y-3">
             {decisions.map((decision) => (
@@ -122,7 +167,7 @@ export function CoachChat({
                       disabled={decision.status === 'INVALID' || !editable}
                       className="min-h-11 rounded-xl bg-brand-600 px-4 text-sm font-semibold text-pitch-950 disabled:opacity-40"
                     >
-                      Apply as draft
+                      Apply now
                     </button>
                   </form>
                   <form action={rejectAction}>
@@ -141,8 +186,9 @@ export function CoachChat({
       <div className="space-y-3">
         {messages.length === 0 && (
           <Empty>
-            Tell your coaching staff how you want to play. They will read the squad and what the
-            opposition have actually been doing, and come back with a plan you can edit.
+            Tell your coaching staff how you want to play, in your own words. They will read the
+            squad and what the opposition have actually been doing, pick the side and set it up.
+            You can always overrule them.
           </Empty>
         )}
         {messages.map((message) => (

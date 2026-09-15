@@ -24,8 +24,8 @@ The AI has no privileged path.
 
 **Why.** It means the AI layer does not have to be trusted. The only thing a
 model can produce is a value the domain already understands, checked against the
-real squad, and a human still has to approve it. Safety comes from the shape of
-the system rather than from the model behaving well.
+real squad. Safety comes from the shape of the system rather than from the model
+behaving well.
 
 It also means the AI and a form cannot diverge. There is no second code path to
 keep in sync, and no class of bug where a proposal is applied by a route the
@@ -110,6 +110,11 @@ by accident six months later. Making it a property of the module graph means it
 cannot be violated without someone deliberately adding an import that reviewers
 would see.
 
+It held by convention until a service was added that sits right at the seam —
+applying a coaching proposal — which is exactly the kind of change that would
+have broken it unnoticed. `tests/domain/layering.test.ts` now reads the imports
+and fails the build instead.
+
 ## 9. Scrypt and opaque session tokens, no auth library
 
 Passwords are hashed with Node's built-in scrypt; sessions are random tokens
@@ -189,7 +194,52 @@ of them look fine on a laptop and are wrong on a phone. Three real defects were
 found and fixed this way, including a grid that pushed the reports page 52px
 sideways on a 320px screen.
 
-## 16. A deploy proves the app works, not that it started
+## 16. The instruction is the approval
+
+Telling the staff what you want applies it. There is no confirmation step.
+
+**Why.** There was one, and it did not work. A proposal rendered in a card above
+the reply with an "Apply as draft" button; managers read the advice, never
+scrolled back up, and concluded the coach did nothing. On a phone the button was
+off-screen entirely. A confirmation nobody sees is not a safety feature, it is a
+dead end that makes the product look broken.
+
+The deeper reason is that the confirmation was asking the wrong question. A
+manager who has just typed "switch to three at the back" has already decided.
+Asking them to confirm it adds a step without adding a judgement.
+
+What actually protects against a misread instruction is being able to see what
+happened and reverse it, so that is what replaced the button: every change is
+listed in plain words — "Formation 4-3-3 → 3-5-2", "In: Costa, Out: Berg" — and
+one tap puts the previous plan back, restored from a snapshot taken before the
+change. `describeTacticalChange` and friends are pure domain functions, so a
+change that happens and is not described is a test failure rather than a
+silence.
+
+**What did not change.** A proposal still parses against the schema, still
+revalidates against the real squad, still goes through `saveMatchPlan` like a
+manual edit, and still lands as a DRAFT. Locking in before the deadline is
+untouched and remains the manager's own act. The AI can still write nothing but
+a plan for the club you manage.
+
+**Cost.** A misread instruction now changes your plan rather than sitting in a
+card. The mitigation is the change list and the undo, and the fact that nothing
+reaches a match until you lock it.
+
+## 17. The manual editors are still there, folded away
+
+Tactics and training open on the coach. The full editors sit behind "Set it
+manually instead".
+
+**Why.** The game is not meant to be a hundred dropdowns — the manager decides
+how much to guide the side, in words. But a model that keeps misreading one
+specific thing is infuriating without an escape hatch, and some changes are
+genuinely faster to make than to describe: swap this one player, nudge the
+defensive line one step. A native `<details>` costs nothing, works before
+hydration, and keeps the editors one tap away without letting them dominate the
+screen.
+
+## 18. A deploy proves the app works, not that it started
 
 The droplet keeps a build only if `/api/health` answers on the published port,
 and that endpoint runs a real query rather than returning a constant.
@@ -206,7 +256,7 @@ script prints a line last and the workflow fails without it. That is not
 hypothetical — it is the shape of a bug that left a sister project reporting
 successful deploys while serving the previous build for days.
 
-## 17. Managed Postgres, and no database on the droplet
+## 19. Managed Postgres, and no database on the droplet
 
 Production runs `docker-compose.prod.yml`, which has one service in it.
 

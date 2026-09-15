@@ -8,11 +8,11 @@ pick the side, choose how the team plays, and lock it in before the deadline.
 Every fixture is then simulated by a conventional match engine, and the whole
 league gets the same report on Monday morning.
 
-Each manager has an AI coaching staff. You tell it what you want in plain
-English; it reads your squad and what the opposition have actually been doing,
-and comes back with a structured plan, its reasoning, and the risks. You edit it,
-approve it, or ignore it. It never picks the team for you and it never decides a
-result.
+Each manager has an AI coaching staff, and that is how you manage. You tell them
+what you want in plain English; they read your squad and what the opposition have
+actually been doing, then pick the side, set the shape and set the training, and
+tell you exactly what they changed. Overrule any of it by hand if you would
+rather. They never decide a result.
 
 ## The idea
 
@@ -23,10 +23,12 @@ conventional, event-based simulation. It takes no dependency on any AI provider,
 performs no I/O, and draws every random number from a seeded generator, so a
 result can be replayed exactly and audited afterwards.
 
-**The human manager decides.** The AI advises and translates. Any proposal it
-makes is parsed against a typed schema, revalidated against your real squad and
-the tactical rules, and stored as an unapplied suggestion until you approve it.
-There is no channel through which it can write game state.
+**The human manager decides.** You tell the staff what you want and they set it
+up — the instruction is the decision, not a form you fill in afterwards. Every
+change is parsed against a typed schema, revalidated against your real squad and
+the tactical rules, listed back to you in plain words, and undoable in one tap.
+It lands as a draft: locking in before the deadline is still your own act, and
+there is no channel through which a model can write anything else.
 
 **Tactical identity is worth something.** A side that trains and plays a coherent
 system becomes more reliable at it. Familiarity is tracked separately for shape,
@@ -140,7 +142,7 @@ a running container.
 
 ```bash
 npm run dev            # development server
-npm test               # 175 tests: domain, engine, familiarity, AI, end to end
+npm test               # 194 tests: domain, engine, familiarity, AI, end to end
 npm run typecheck      # strict TypeScript, no emit
 npm run calibrate      # run 900 matches and print the statistical profile
 npm run check:mobile   # walk every screen at five viewport sizes

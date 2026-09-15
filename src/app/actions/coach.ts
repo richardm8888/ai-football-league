@@ -3,24 +3,30 @@
 import { revalidatePath } from 'next/cache';
 import { askCoach, resolveDecision } from '@/ai/coach';
 import { prisma } from '@/lib/db';
-import { lineupSelectionSchema, tacticalPlanSchema, trainingPlanSchema } from '@/domain/schemas';
-import type { MatchdayPhase } from '@/domain/types';
 import { canManageClub } from '@/domain/visibility';
 import { getViewer } from '@/services/auth';
-import { getOrCreateMatchPlan, PlanError, saveMatchPlan, saveTrainingPlan } from '@/services/plans';
+import { applyDecision, undoDecision } from '@/services/ai-decisions';
+import { PlanError } from '@/services/plans';
 import { requireUser } from '@/services/page-context';
 
 /**
  * Server actions for the coaching staff.
  *
- * Two separate steps, deliberately: asking for advice never changes anything,
- * and applying advice writes a draft that the manager still has to approve and
- * lock on the tactics screen.
+ * Telling the staff what you want IS the decision. A proposal that survives
+ * validation is applied to the draft plan there and then, the reply says what
+ * moved, and one tap puts it back. The manager still approves and locks the
+ * plan before the deadline, which is where the real commitment has always been.
+ *
+ * The earlier design asked for a second click on a card that rendered above the
+ * reply, so managers read the advice, never saw the button, and concluded the
+ * coach did not do anything.
  */
 
 export interface CoachActionState {
   error?: string;
   message?: string;
+  /** What the instruction actually changed, and how to put it back. */
+  applied?: { changes: string[]; warnings: string[]; decisionIds: string[] };
 }
 
 async function authoriseClub(clubId: string) {
@@ -42,10 +48,44 @@ export async function askCoachAction(
 
   try {
     const result = await askCoach({ clubId, userId: user.id, message, matchdayId });
+
+    // Apply whatever survived validation. Each is attempted on its own so a
+    // training plan still lands when the tactical half is refused, and so a
+    // locked matchday returns the advice rather than swallowing it.
+    const changes: string[] = [];
+    const warnings: string[] = [];
+    const decisionIds: string[] = [];
+    const refusals: string[] = [];
+
+    for (const decision of result.decisions) {
+      if (decision.status !== 'PROPOSED') continue;
+      try {
+        const applied = await applyDecision(decision.id, user.id);
+        changes.push(...applied.changes);
+        warnings.push(...applied.warnings);
+        decisionIds.push(decision.id);
+      } catch (error) {
+        refusals.push(error instanceof PlanError
+          ? error.message
+          : `That could not be applied: ${(error as Error).message}`);
+      }
+    }
+
     revalidatePath('/coach');
+    revalidatePath('/tactics');
+    revalidatePath('/training');
+    revalidatePath('/squad');
+
+    const notes: string[] = [];
+    if (result.fallbackUsed) {
+      notes.push('Answered by the local coach because the provider was unavailable.');
+    }
+    notes.push(...refusals);
+
     return {
-      message: result.fallbackUsed
-        ? 'Answered by the local coach because the provider was unavailable.'
+      message: notes.length > 0 ? notes.join(' ') : undefined,
+      applied: decisionIds.length > 0
+        ? { changes, warnings, decisionIds }
         : undefined,
     };
   } catch (error) {
@@ -57,8 +97,11 @@ export async function askCoachAction(
 }
 
 /**
- * Apply an AI proposal as a draft. The manager still reviews, approves and locks
- * it in the normal way, so the AI never commits anything on its own.
+ * Apply a proposal explicitly.
+ *
+ * Instructions apply themselves, so this is only reached for a proposal that
+ * could not be applied at the time — a matchday that was locked and has since
+ * been reopened, most likely.
  */
 export async function applyProposalAction(
   _state: CoachActionState, formData: FormData,
@@ -70,71 +113,58 @@ export async function applyProposalAction(
   if (!decision) return { error: 'That proposal no longer exists.' };
   await authoriseClub(decision.clubId);
 
-  if (decision.status === 'INVALID') {
-    return { error: 'That proposal failed validation and cannot be applied.' };
-  }
-
   try {
-    if (decision.kind === 'TACTICAL_PLAN') {
-      const payload = decision.proposal as { tactics?: unknown; lineup?: unknown };
-      const fixture = await prisma.fixture.findFirst({
-        where: {
-          matchday: { phase: { not: 'COMPLETE' } },
-          OR: [{ homeClubId: decision.clubId }, { awayClubId: decision.clubId }],
-        },
-        include: { matchday: true },
-        orderBy: { matchday: { number: 'asc' } },
-      });
-      if (!fixture) return { error: 'There is no fixture to apply this to.' };
-
-      const existing = await getOrCreateMatchPlan(fixture.id, decision.clubId);
-      const tactics = tacticalPlanSchema.parse({ ...existing.tactics, ...(payload.tactics ?? {}) });
-      const lineup = payload.lineup
-        ? lineupSelectionSchema.parse(payload.lineup)
-        : existing.lineup;
-
-      await saveMatchPlan({
-        fixtureId: fixture.id,
-        clubId: decision.clubId,
-        userId: user.id,
-        phase: fixture.matchday.phase as MatchdayPhase,
-        plan: { tactics, lineup, notes: existing.notes },
-        source: 'AI_ASSISTED',
-        approve: false,
-      });
-    } else if (decision.kind === 'TRAINING_PLAN') {
-      const matchday = await prisma.matchday.findFirst({
-        where: { season: { league: { clubs: { some: { id: decision.clubId } } } }, phase: { not: 'COMPLETE' } },
-        orderBy: { number: 'asc' },
-      });
-      if (!matchday) return { error: 'There is no matchday to apply this to.' };
-      await saveTrainingPlan({
-        clubId: decision.clubId,
-        matchdayId: matchday.id,
-        userId: user.id,
-        phase: matchday.phase as MatchdayPhase,
-        plan: trainingPlanSchema.parse(decision.proposal),
-        source: 'AI_ASSISTED',
-        approve: false,
-      });
-    } else {
-      return { error: 'That kind of proposal cannot be applied directly.' };
-    }
-
-    await resolveDecision(decisionId, user.id, 'APPROVED');
+    const applied = await applyDecision(decisionId, user.id);
+    revalidatePath('/coach');
+    revalidatePath('/tactics');
+    revalidatePath('/training');
+    revalidatePath('/squad');
+    return {
+      applied: {
+        changes: applied.changes,
+        warnings: applied.warnings,
+        decisionIds: [decisionId],
+      },
+    };
   } catch (error) {
     if (error instanceof PlanError) return { error: error.message };
     return { error: (error as Error).message };
+  }
+}
+
+/**
+ * Put back the plan as it was before an instruction.
+ *
+ * This is what makes applying on sight safe: a misread instruction costs one
+ * tap rather than a matchday.
+ */
+export async function undoChangeAction(
+  _state: CoachActionState, formData: FormData,
+): Promise<CoachActionState> {
+  const ids = String(formData.get('decisionIds') ?? '').split(',').filter(Boolean);
+  if (ids.length === 0) return { error: 'There is nothing to undo.' };
+
+  const user = await requireUser();
+
+  // Newest first, so undoing several from one instruction rewinds in the order
+  // they were applied rather than leaving a half-restored plan.
+  for (const id of [...ids].reverse()) {
+    const decision = await prisma.aiDecision.findUnique({ where: { id } });
+    if (!decision) continue;
+    await authoriseClub(decision.clubId);
+    try {
+      await undoDecision(id, user.id);
+    } catch (error) {
+      if (error instanceof PlanError) return { error: error.message };
+      return { error: (error as Error).message };
+    }
   }
 
   revalidatePath('/coach');
   revalidatePath('/tactics');
   revalidatePath('/training');
-  return {
-    message: decision.kind === 'TRAINING_PLAN'
-      ? 'Applied as a training draft. Review and approve it on the training screen.'
-      : 'Applied as a draft. Review the warnings and approve it on the tactics screen.',
-  };
+  revalidatePath('/squad');
+  return { message: 'Put back. Your plan is as it was before that instruction.' };
 }
 
 export async function rejectProposalAction(
