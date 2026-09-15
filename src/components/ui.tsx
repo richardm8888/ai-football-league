@@ -194,3 +194,50 @@ export function humanise(value: string): string {
     .replace(/^f (\d)/, '$1')
     .replace(/^\w/, (c) => c.toUpperCase());
 }
+
+/**
+ * The coach as the front door.
+ *
+ * Every screen that used to open on a form now opens on this: say what you
+ * want, and the staff set it up. The form is still there underneath for the
+ * times a manager wants one specific thing changed and would rather do it than
+ * describe it.
+ */
+export function CoachFirst({ what, examples }: { what: string; examples: string[] }) {
+  return (
+    <Card className="border-brand-600/40 bg-brand-600/5">
+      <CardTitle>Tell your staff</CardTitle>
+      <p className="text-sm text-ink-200">{what}</p>
+      <ul className="mt-2 space-y-1 text-sm text-ink-400">
+        {examples.map((example) => (
+          <li key={example} className="italic">“{example}”</li>
+        ))}
+      </ul>
+      <LinkButton href="/coach" tone="primary" className="mt-3 w-full sm:w-auto">
+        Talk to your coaching staff
+      </LinkButton>
+    </Card>
+  );
+}
+
+/**
+ * The manual editor, folded away.
+ *
+ * A native <details> rather than state: it works before hydration, it is
+ * keyboard and screen-reader accessible for free, and the browser remembers
+ * nothing between visits, which is right — the point is that opening it is a
+ * deliberate act each time.
+ */
+export function ManualOverride({
+  label, children,
+}: { label: string; children: ReactNode }) {
+  return (
+    <details className="group rounded-2xl border border-line-700/60 bg-pitch-900/40">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm text-ink-300">
+        <span>{label}</span>
+        <span aria-hidden="true" className="text-ink-500 transition group-open:rotate-90">›</span>
+      </summary>
+      <div className="border-t border-line-700/60 p-4">{children}</div>
+    </details>
+  );
+}

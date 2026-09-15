@@ -4,7 +4,7 @@ import { loadClubFamiliarity, loadSquad } from '@/services/club';
 import { getOrCreateMatchPlan, getOrCreateTrainingPlan, toTrainingInput } from '@/services/plans';
 import { requireClubContext } from '@/services/page-context';
 import { TrainingEditor, type TrainingPlayer } from '@/components/training-editor';
-import { Alert, PageHeader } from '@/components/ui';
+import { Alert, CoachFirst, ManualOverride, PageHeader } from '@/components/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,6 +50,16 @@ export default async function TrainingPage() {
         title="Training"
         subtitle={`Matchday ${context.matchday.number} · what the week on the grass buys you`}
       />
+      <CoachFirst
+        what="Say what the side needs to work on this week. Your staff set the focus and the intensity, and weigh the fitness cost against the gain."
+        examples={[
+          'We keep getting pressed into mistakes — work on playing out from the back.',
+          'Start rehearsing three at the back, we will switch to it in a few weeks.',
+          'Legs looked heavy last week. Keep it light.',
+        ]}
+      />
+
+      <ManualOverride label="Set it manually instead">
       <TrainingEditor
         clubId={context.club.id}
         matchdayId={context.matchday.id}
@@ -67,6 +77,7 @@ export default async function TrainingPage() {
           setPieces: familiarity.SET_PIECES,
         }}
       />
+      </ManualOverride>
     </>
   );
 }

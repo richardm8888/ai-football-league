@@ -903,6 +903,7 @@ enum AiDecisionStatus {
   REJECTED
   INVALID
   SUPERSEDED
+  UNDONE
 }
 
 /// Every AI proposal is logged with its validation result and what the human did
@@ -923,6 +924,10 @@ model AiDecision {
   /// Domain validation outcome: ok, errors, warnings.
   validation     Json
   rationale      String           @default("")
+  /// The plan this proposal replaced, so an applied change can be undone.
+  /// Null when the proposal was never applied.
+  previousState  Json?
+  appliedAt      DateTime?
   approvedById   String?
   approvedAt     DateTime?
   createdAt      DateTime         @default(now())
