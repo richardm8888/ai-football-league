@@ -35,6 +35,9 @@ interface Intent {
   playAroundPress: boolean;
   setPieces: boolean;
   rotate: boolean;
+  workOnBuildUp: boolean;
+  trainLight: boolean;
+  trainHard: boolean;
   vague: boolean;
 }
 
@@ -54,6 +57,11 @@ const PATTERNS: Array<[keyof Intent, RegExp]> = [
   ['playAroundPress', /around them|play around|beat the press|through the press|they press/i],
   ['setPieces', /set(-| )piece|corner|free kick|dead ball/i],
   ['rotate', /rotate|rest|freshen|rotation|tired/i],
+  // Instructions about the week's work rather than the match itself. Without
+  // these the screens could advertise training the staff would not act on.
+  ['workOnBuildUp', /out from the back|playing out|work on (our )?build(-| )?up|build(-| )?up play/i],
+  ['trainLight', /keep (it|training) light|light (week|session|training)|ease off|legs? (are |look(ed)? )?heavy|manage the load/i],
+  ['trainHard', /work (them|us) hard|hard week|high intensity|really push|ramp (it|the intensity) up/i],
 ];
 
 /**
@@ -63,12 +71,13 @@ const PATTERNS: Array<[keyof Intent, RegExp]> = [
  */
 const OPPONENT_CLAUSE = /\b(they|their|theirs|the opposition|the opponents?)\b[^,.;!?]*/gi;
 
-function readIntent(message: string): Intent {
+export function readIntent(message: string): Intent {
   const intent = {
     possession: false, direct: false, counter: false, pressHigh: false, sitDeep: false,
     protectMidfield: false, useWidth: false, usePace: false, cautiousStart: false,
     chaseIfBehind: false, avoidTransitionRisk: false, patient: false,
-    playAroundPress: false, setPieces: false, rotate: false, vague: false,
+    playAroundPress: false, setPieces: false, rotate: false, workOnBuildUp: false,
+    trainLight: false, trainHard: false, vague: false,
   } as Intent;
   const ourIntentText = message.replace(OPPONENT_CLAUSE, ' ');
   for (const [key, pattern] of PATTERNS) {
@@ -284,7 +293,22 @@ export function proposeLocally(request: CoachRequest): CoachProposal {
   }
 
   // --- Training ------------------------------------------------------------
-  const training = recommendTraining(context, plan);
+  const training = recommendTraining(context, plan, intent);
+  if (intent.workOnBuildUp) {
+    reasons.push('The week on the grass goes on playing out from the back, which is what you asked for.');
+  }
+  if (intent.setPieces) {
+    reasons.push('Set-piece routines are the training focus this week.');
+  }
+  if (intent.trainLight) {
+    reasons.push('Training is kept light with recovery work alongside it, so the legs are there on matchday.');
+  }
+  if (intent.trainHard) {
+    reasons.push('The week is worked hard, which buys conditioning at the cost of fresh legs on matchday.');
+    if (training.intensity === 'HIGH' || training.intensity === 'VERY_HIGH') {
+      risks.push('A hard week leaves less in the tank for the match itself, and heavy sessions carry more injury risk.');
+    }
+  }
 
   // --- Questions -----------------------------------------------------------
   if (intent.vague) {
@@ -321,7 +345,9 @@ export function proposeLocally(request: CoachRequest): CoachProposal {
   });
 }
 
-function recommendTraining(context: CoachContext, plan: TacticalPlanInput): TrainingPlanInput {
+function recommendTraining(
+  context: CoachContext, plan: TacticalPlanInput, intent: Intent,
+): TrainingPlanInput {
   const gaps: Array<{ focus: TrainingPlanInput['primaryFocus']; value: number }> = [
     { focus: 'FORMATION_FAMILIARITY', value: context.availableFormations.find((f) => f.formation === plan.formation)?.familiarity ?? 30 },
     { focus: 'PRESSING', value: context.familiarity.pressing },
@@ -342,10 +368,20 @@ function recommendTraining(context: CoachContext, plan: TacticalPlanInput): Trai
   const averageFitness = context.squad.filter((p) => p.available)
     .reduce((acc, p) => acc + p.fitness, 0) / Math.max(1, context.squad.filter((p) => p.available).length);
 
-  const primary = weakest?.focus ?? 'MATCH_PREPARATION';
-  const secondary: TrainingPlanInput['secondaryFocus'] = averageFitness < 78 ? 'RECOVERY' : 'MATCH_PREPARATION';
-  const intensity: TrainingPlanInput['intensity'] = averageFitness < 72 ? 'LIGHT'
-    : averageFitness < 84 ? 'NORMAL' : 'HIGH';
+  // A manager who names the area to work on has already decided; the
+  // weakest-area heuristic is for when they have not said.
+  const named: TrainingPlanInput['primaryFocus'] | null = intent.workOnBuildUp ? 'POSSESSION'
+    : intent.setPieces ? 'SET_PIECES' : null;
+
+  const primary = named ?? weakest?.focus ?? 'MATCH_PREPARATION';
+  const secondary: TrainingPlanInput['secondaryFocus'] = intent.trainLight || averageFitness < 78
+    ? 'RECOVERY' : 'MATCH_PREPARATION';
+  // An instruction about how hard the week is outranks the fitness reading,
+  // because the manager can see the same fitness numbers the heuristic does.
+  const intensity: TrainingPlanInput['intensity'] = intent.trainLight ? 'LIGHT'
+    : intent.trainHard ? (averageFitness < 72 ? 'NORMAL' : 'HIGH')
+      : averageFitness < 72 ? 'LIGHT'
+        : averageFitness < 84 ? 'NORMAL' : 'HIGH';
 
   return {
     primaryFocus: primary,
@@ -353,7 +389,9 @@ function recommendTraining(context: CoachContext, plan: TacticalPlanInput): Trai
     intensity,
     targetFormation: primary === 'FORMATION_FAMILIARITY' ? plan.formation : null,
     individualFocus: [],
-    notes: `Weakest relevant area is ${primary.replace(/_/g, ' ').toLowerCase()} at ${Math.round(weakest?.value ?? 0)}%. Squad fitness averages ${Math.round(averageFitness)}%.`,
+    notes: named
+      ? `Working on ${primary.replace(/_/g, ' ').toLowerCase()} as instructed. Squad fitness averages ${Math.round(averageFitness)}%.`
+      : `Weakest relevant area is ${primary.replace(/_/g, ' ').toLowerCase()} at ${Math.round(weakest?.value ?? 0)}%. Squad fitness averages ${Math.round(averageFitness)}%.`,
   };
 }
 

@@ -25,6 +25,12 @@ import { requireUser } from '@/services/page-context';
 export interface CoachActionState {
   error?: string;
   message?: string;
+  /**
+   * Advice the staff gave that could not be acted on — a locked plan, most
+   * often. Kept apart from `message` because a refusal reported as a
+   * confirmation is worse than no message at all.
+   */
+  refusals?: string[];
   /** What the instruction actually changed, and how to put it back. */
   applied?: { changes: string[]; warnings: string[]; decisionIds: string[] };
 }
@@ -76,14 +82,11 @@ export async function askCoachAction(
     revalidatePath('/training');
     revalidatePath('/squad');
 
-    const notes: string[] = [];
-    if (result.fallbackUsed) {
-      notes.push('Answered by the local coach because the provider was unavailable.');
-    }
-    notes.push(...refusals);
-
     return {
-      message: notes.length > 0 ? notes.join(' ') : undefined,
+      message: result.fallbackUsed
+        ? 'Answered by the local coach because the provider was unavailable.'
+        : undefined,
+      refusals: refusals.length > 0 ? refusals : undefined,
       applied: decisionIds.length > 0
         ? { changes, warnings, decisionIds }
         : undefined,

@@ -9,6 +9,8 @@ import { ROLE_DEFINITIONS, rolesForPosition } from '@/domain/tactics/roles';
 import { validateTrainingPlan } from '@/domain/validation';
 import { TRAINING_FOCUSES, TRAINING_INTENSITIES } from '@/domain/types';
 import type { Formation, PlayerRole, TrainingFocus, TrainingIntensity } from '@/domain/types';
+import { fingerprint } from '@/lib/fingerprint';
+import { ActionBar, ActionNote, ActionSubmit, atTime } from './action-bar';
 import { Alert, Badge, Card, CardTitle, Empty, Field, humanise, inputClass, Meter } from './ui';
 
 /**
@@ -78,14 +80,15 @@ export function TrainingEditor({
   const set = <K extends keyof TrainingPlanInput>(key: K, value: TrainingPlanInput[K]) =>
     setPlan({ ...plan, [key]: value });
 
+  const planJson = JSON.stringify(plan);
+
+  // The same settled state the tactics screen uses: what the server said it
+  // saved, compared with what is on screen now.
+  const saved = state.outcome;
+  const unchangedSinceSave = saved?.plan !== undefined && saved.plan === fingerprint(planJson);
+
   return (
     <div className="space-y-4 pb-4">
-      {state.message && <Alert tone="good">{state.message}</Alert>}
-      {state.error && (
-        <Alert tone="bad" title={state.error}>
-          {state.validation?.errors.map((issue, i) => <p key={i}>{issue.message}</p>)}
-        </Alert>
-      )}
       {!editable && (
         <Alert tone="warn" title="Training is closed for this matchday">
           The week has moved on. Training opens again with the next matchday.
@@ -251,23 +254,48 @@ export function TrainingEditor({
         </Alert>
       )}
 
-      <form action={action} className="sticky bottom-[4.75rem] z-20 -mx-4 flex gap-2 border-t border-line-700/60 bg-pitch-950/95 px-4 py-3 backdrop-blur">
-        <input type="hidden" name="clubId" value={clubId} />
-        <input type="hidden" name="matchdayId" value={matchdayId} />
-        <input type="hidden" name="plan" value={JSON.stringify(plan)} />
-        <button
-          type="submit" disabled={!editable || !validation.ok}
-          className="min-h-11 flex-1 rounded-xl border border-line-700 bg-pitch-800 px-4 disabled:opacity-40"
-        >
-          Save draft
-        </button>
-        <button
-          type="submit" name="approve" value="1" disabled={!editable || !validation.ok}
-          className="min-h-11 flex-1 rounded-xl bg-brand-600 px-4 font-semibold text-pitch-950 disabled:opacity-40"
-        >
-          Approve training
-        </button>
-      </form>
+      {/* The week is submitted here, and says here what it did with it. */}
+      <ActionBar>
+        {state.error ? (
+          <ActionNote tone="bad" className="mb-2">
+            {state.error}
+            {(state.validation?.errors ?? []).length > 0
+              && ` ${(state.validation?.errors ?? []).map((issue) => issue.message).join(' ')}`}
+          </ActionNote>
+        ) : saved ? (
+          <ActionNote tone={unchangedSinceSave ? 'good' : 'warn'} className="mb-2">
+            {saved.kind === 'APPROVED' ? 'Training approved' : 'Draft saved'} {atTime(saved.at)}
+            {!unchangedSinceSave && ' · you have changed something since'}
+          </ActionNote>
+        ) : null}
+
+        <form action={action} className="flex gap-2">
+          <input type="hidden" name="clubId" value={clubId} />
+          <input type="hidden" name="matchdayId" value={matchdayId} />
+          <input type="hidden" name="plan" value={planJson} />
+          <ActionSubmit
+            name="approve" value="0"
+            pendingLabel="Saving…"
+            settled={saved?.kind === 'SAVED' && unchangedSinceSave}
+            settledLabel="Saved ✓"
+            disabled={!editable || !validation.ok}
+            className="min-h-11 flex-1 rounded-xl border border-line-700 bg-pitch-800 px-4 disabled:opacity-40"
+          >
+            Save draft
+          </ActionSubmit>
+          <ActionSubmit
+            name="approve" value="1"
+            pendingLabel="Approving…"
+            settled={saved?.kind === 'APPROVED' && unchangedSinceSave}
+            settledLabel="Approved ✓"
+            disabled={!editable || !validation.ok}
+            className="min-h-11 flex-1 rounded-xl bg-brand-600 px-4 font-semibold text-pitch-950 disabled:opacity-40"
+          >
+            Approve training
+          </ActionSubmit>
+        </form>
+
+      </ActionBar>
     </div>
   );
 }

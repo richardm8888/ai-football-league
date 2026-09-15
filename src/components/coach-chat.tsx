@@ -1,12 +1,15 @@
 'use client';
 
-import { useActionState, useEffect, useRef } from 'react';
+import { useActionState, useCallback, useEffect, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
 import {
   applyProposalAction, askCoachAction, rejectProposalAction, undoChangeAction,
   type CoachActionState,
 } from '@/app/actions/coach';
-import { Alert, Badge, Card, ChipRow, Empty, humanise } from './ui';
+import { COACH_OPENERS } from '@/ai/vocabulary';
+import { ActionNote } from './action-bar';
+import { CoachGuide } from './coach-guide';
+import { Badge, Card, ChipRow, Empty, humanise } from './ui';
 
 /**
  * The coaching conversation.
@@ -14,6 +17,11 @@ import { Alert, Badge, Card, ChipRow, Empty, humanise } from './ui';
  * Built for a phone keyboard: the composer is pinned above the navigation, the
  * thread scrolls to the newest message, and suggested openers mean a manager can
  * start a useful conversation with one tap rather than a paragraph of typing.
+ *
+ * Everything the staff do in response lands below the thread rather than above
+ * it. A confirmation rendered at the top of a conversation is a confirmation
+ * nobody sees: the manager is looking at the bottom of the screen, where they
+ * just typed.
  */
 
 export interface CoachMessage {
@@ -38,14 +46,6 @@ export interface CoachDecision {
   createdAt: string;
 }
 
-const OPENERS = [
-  'I want us to dominate possession but avoid being exposed in transition.',
-  'We are weaker in midfield, so I want to protect the centre of the pitch.',
-  'They press aggressively, so we should play around them rather than forcing short passes.',
-  'I want us to start cautiously and become more attacking if we are behind.',
-  'We should use our pace on the wings and attack the space behind their full-backs.',
-];
-
 export function CoachChat({
   clubId, matchdayId, coachName, coachPersona, messages, decisions, providerLabel, editable,
 }: {
@@ -65,16 +65,28 @@ export function CoachChat({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages.length]);
-
   const notice = askState.message ?? applyState.message ?? rejectState.message ?? undoState.message;
   const error = askState.error ?? applyState.error ?? rejectState.error ?? undoState.error;
+  const refusals = askState.refusals ?? [];
 
   // What the last instruction actually changed. Shown because the staff act on
   // sight now: the manager has to be able to check their reading of it.
   const applied = askState.applied ?? applyState.applied;
+  const appliedKey = applied?.decisionIds.join(',') ?? '';
+
+  // Bring the newest message and whatever it changed into view together. The
+  // marker carries a scroll margin so the pinned composer does not sit on top
+  // of the thing the manager is being shown.
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages.length, appliedKey]);
+
+  const fill = useCallback((text: string) => {
+    const input = inputRef.current;
+    if (!input) return;
+    input.value = text;
+    input.focus();
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -93,8 +105,55 @@ export function CoachChat({
         </div>
       </Card>
 
-      {notice && <Alert tone="good">{notice}</Alert>}
-      {error && <Alert tone="warn" title="The coaching staff had a problem">{error}</Alert>}
+      <div className="space-y-3">
+        {messages.length === 0 && (
+          <Empty>
+            Tell your coaching staff how you want to play, in your own words. They will read the
+            squad and what the opposition have actually been doing, pick the side and set it up.
+            You can always overrule them.
+          </Empty>
+        )}
+        {messages.map((message) => (
+          <div
+            key={message.id}
+            className={message.role === 'USER' ? 'flex justify-end' : 'flex justify-start'}
+          >
+            <div
+              className={`max-w-[92%] rounded-2xl px-4 py-3 text-sm leading-relaxed sm:max-w-[80%] ${
+                message.role === 'USER'
+                  ? 'bg-brand-600/20 text-ink-50'
+                  : 'border border-line-700/60 bg-pitch-900'
+              }`}
+            >
+              <p className="whitespace-pre-wrap">{message.content}</p>
+
+              {message.risks && message.risks.length > 0 && (
+                <div className="mt-3 rounded-lg bg-warn-500/10 px-3 py-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-warn-400">Risks</p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-ink-200">
+                    {message.risks.map((risk, i) => <li key={i}>{risk}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {message.questions && message.questions.length > 0 && (
+                <div className="mt-2 rounded-lg bg-info-400/10 px-3 py-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-info-400">
+                    They want to know
+                  </p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-ink-200">
+                    {message.questions.map((question, i) => <li key={i}>{question}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {message.fallbackUsed && (
+                <p className="mt-2 text-[11px] text-ink-500">Answered by the local coach.</p>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
 
       {applied && (
         <Card>
@@ -183,69 +242,22 @@ export function CoachChat({
         </Card>
       )}
 
-      <div className="space-y-3">
-        {messages.length === 0 && (
-          <Empty>
-            Tell your coaching staff how you want to play, in your own words. They will read the
-            squad and what the opposition have actually been doing, pick the side and set it up.
-            You can always overrule them.
-          </Empty>
-        )}
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={message.role === 'USER' ? 'flex justify-end' : 'flex justify-start'}
-          >
-            <div
-              className={`max-w-[92%] rounded-2xl px-4 py-3 text-sm leading-relaxed sm:max-w-[80%] ${
-                message.role === 'USER'
-                  ? 'bg-brand-600/20 text-ink-50'
-                  : 'border border-line-700/60 bg-pitch-900'
-              }`}
-            >
-              <p className="whitespace-pre-wrap">{message.content}</p>
+      <div ref={endRef} className="scroll-mb-40" />
 
-              {message.risks && message.risks.length > 0 && (
-                <div className="mt-3 rounded-lg bg-warn-500/10 px-3 py-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-warn-400">Risks</p>
-                  <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-ink-200">
-                    {message.risks.map((risk, i) => <li key={i}>{risk}</li>)}
-                  </ul>
-                </div>
-              )}
-
-              {message.questions && message.questions.length > 0 && (
-                <div className="mt-2 rounded-lg bg-info-400/10 px-3 py-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-info-400">
-                    They want to know
-                  </p>
-                  <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-ink-200">
-                    {message.questions.map((question, i) => <li key={i}>{question}</li>)}
-                  </ul>
-                </div>
-              )}
-
-              {message.fallbackUsed && (
-                <p className="mt-2 text-[11px] text-ink-500">Answered by the local coach.</p>
-              )}
-            </div>
-          </div>
-        ))}
-        <div ref={endRef} />
-      </div>
+      <CoachGuide onUse={fill} />
 
       <div className="sticky bottom-[4.75rem] z-20 -mx-4 border-t border-line-700/60 bg-pitch-950/95 px-4 py-3 backdrop-blur">
+        {error && <ActionNote tone="bad" className="mb-2">{error}</ActionNote>}
+        {refusals.map((refusal) => (
+          <ActionNote key={refusal} tone="warn" className="mb-2">{refusal}</ActionNote>
+        ))}
+        {!error && notice && <ActionNote tone="good" className="mb-2">{notice}</ActionNote>}
         <ChipRow>
-          {OPENERS.map((opener) => (
+          {COACH_OPENERS.map((opener) => (
             <button
               key={opener}
               type="button"
-              onClick={() => {
-                if (inputRef.current) {
-                  inputRef.current.value = opener;
-                  inputRef.current.focus();
-                }
-              }}
+              onClick={() => fill(opener)}
               className="min-h-9 max-w-[16rem] truncate whitespace-nowrap rounded-full border border-line-700 bg-pitch-900 px-3 text-xs text-ink-300"
             >
               {opener}

@@ -4,6 +4,7 @@ import { loadClubFamiliarity, loadSquad } from '@/services/club';
 import { getOrCreateMatchPlan, getOrCreateTrainingPlan, toTrainingInput } from '@/services/plans';
 import { requireClubContext } from '@/services/page-context';
 import { TrainingEditor, type TrainingPlayer } from '@/components/training-editor';
+import { topicExamples } from '@/ai/vocabulary';
 import { Alert, CoachFirst, ManualOverride, PageHeader } from '@/components/ui';
 
 export const dynamic = 'force-dynamic';
@@ -52,11 +53,7 @@ export default async function TrainingPage() {
       />
       <CoachFirst
         what="Say what the side needs to work on this week. Your staff set the focus and the intensity, and weigh the fitness cost against the gain."
-        examples={[
-          'We keep getting pressed into mistakes — work on playing out from the back.',
-          'Start rehearsing three at the back, we will switch to it in a few weeks.',
-          'Legs looked heavy last week. Keep it light.',
-        ]}
+        examples={topicExamples('training', 3)}
       />
 
       <ManualOverride label="Set it manually instead">

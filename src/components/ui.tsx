@@ -221,18 +221,22 @@ export function CoachFirst({ what, examples }: { what: string; examples: string[
 }
 
 /**
- * The manual editor, folded away.
+ * Something folded away until it is wanted.
  *
  * A native <details> rather than state: it works before hydration, it is
  * keyboard and screen-reader accessible for free, and the browser remembers
  * nothing between visits, which is right — the point is that opening it is a
  * deliberate act each time.
  */
-export function ManualOverride({
-  label, children,
-}: { label: string; children: ReactNode }) {
+export function Disclosure({
+  label, children, className = '', tone = 'muted',
+}: { label: ReactNode; children: ReactNode; className?: string; tone?: 'muted' | 'brand' }) {
   return (
-    <details className="group rounded-2xl border border-line-700/60 bg-pitch-900/40">
+    <details
+      className={`group rounded-2xl border ${
+        tone === 'brand' ? 'border-brand-600/40 bg-brand-600/5' : 'border-line-700/60 bg-pitch-900/40'
+      } ${className}`}
+    >
       <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm text-ink-300">
         <span>{label}</span>
         <span aria-hidden="true" className="text-ink-500 transition group-open:rotate-90">›</span>
@@ -240,4 +244,11 @@ export function ManualOverride({
       <div className="border-t border-line-700/60 p-4">{children}</div>
     </details>
   );
+}
+
+/** The manual editor, folded away behind its own deliberate tap. */
+export function ManualOverride({
+  label, children,
+}: { label: string; children: ReactNode }) {
+  return <Disclosure label={label}>{children}</Disclosure>;
 }

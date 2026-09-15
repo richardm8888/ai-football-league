@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { BottomNav } from '@/components/nav';
+import { Tour } from '@/components/tour';
 import { loadPageContext } from '@/services/page-context';
 
 /**
@@ -29,6 +30,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </span>
           </Link>
           <div className="flex items-center gap-2">
+            <Tour seen={context.user.tourSeenAt !== null} />
             {context.league.isAdmin && (
               <Link href="/admin" className="flex min-h-11 items-center rounded-lg border border-line-700 px-3 text-xs text-ink-200">
                 Admin
