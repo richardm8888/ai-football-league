@@ -4,7 +4,7 @@ import { requireClubContext } from '@/services/page-context';
 import { canEditPlans, canLockPlan } from '@/domain/validation';
 import { TacticsEditor } from '@/components/tactics-editor';
 import type { EditorPlayer } from '@/components/tactics-editor-types';
-import { Alert, PageHeader } from '@/components/ui';
+import { Alert, CoachFirst, ManualOverride, PageHeader } from '@/components/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,6 +54,16 @@ export default async function TacticsPage() {
         title="Tactics"
         subtitle={`Matchday ${context.matchday.number} · ${context.fixture.venue === 'HOME' ? 'vs' : 'away to'} ${context.fixture.opponentName}`}
       />
+      <CoachFirst
+        what="Describe how you want to play and who should be in the side. Your staff pick the eleven, the shape and the instructions, and tell you what they changed."
+        examples={[
+          'Play three at the back and get our wing-backs high up the pitch.',
+          'Rest Hana, she is not fully fit. Bring in whoever is sharpest.',
+          'Sit deeper and hit them on the counter.',
+        ]}
+      />
+
+      <ManualOverride label="Set it manually instead">
       <TacticsEditor
         fixtureId={context.fixture.id}
         clubId={context.club.id}
@@ -69,6 +79,7 @@ export default async function TacticsPage() {
         familiarity={familiarity}
         previousPlan={previousPlan}
       />
+      </ManualOverride>
     </>
   );
 }

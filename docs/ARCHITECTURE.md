@@ -145,8 +145,10 @@ Four things stand between a model and the game state:
 1. It can only answer through a typed tool schema.
 2. Whatever comes back is parsed; anything outside the schema is stripped.
 3. What survives is revalidated against the real squad and the tactical rules.
-4. It is stored as an unapplied proposal until a human approves it, and approval
-   goes through the same plan service a manual edit uses.
+4. What it writes is a draft, through the same plan service a manual edit uses,
+   described back to the manager line by line and reversible in one tap. The
+   manager's instruction is the authorisation; locking the plan before the
+   deadline is the commitment.
 
 Untrusted text — club names, player names, notes, the manager's own message — is
 escaped and wrapped in labelled data blocks that the system prompt defines as
@@ -176,10 +178,10 @@ errors.
 
 | Suite | Needs a database | What it covers |
 | --- | --- | --- |
-| `tests/domain` | no | Vocabulary parity, fixture generation, every validation rule, phase gates |
+| `tests/domain` | no | Vocabulary parity, fixture generation, every validation rule, phase gates, change descriptions, and the layering rules themselves |
 | `tests/engine` | no | Determinism, statistical realism, home advantage, quality, fitness, tactical effects, reporting accuracy |
 | `tests/familiarity` | no | Growth, decay, targeted disruption, change costs, gradual transitions, bounded effect |
-| `tests/ai` | yes | Structured output, rejection of invalid proposals, privacy, inability to touch results, failure fallback, injection, fairness |
+| `tests/ai` | yes | Structured output, rejection of invalid proposals, privacy, inability to touch results, failure fallback, injection, fairness, and that applying an instruction is described and reversible |
 | `tests/e2e` | yes | The complete matchday walk-through against real persistence |
 
 `scripts/calibrate.ts` is a balancing tool rather than a test: it plays 900
