@@ -131,7 +131,7 @@ say "Running migrations"
 # container input, and everything below this line would silently not happen.
 # The workflow writes the script to a file for the same reason; this is the
 # second lock on that door.
-if ! "${COMPOSE[@]}" run --rm -T app npx prisma migrate deploy < /dev/null; then
+if ! "${COMPOSE[@]}" run --rm -T app node node_modules/prisma/build/index.js migrate deploy < /dev/null; then
     say "Migration failed — nothing has been swapped, the old build is still serving"
     set_tag "$PREVIOUS"
     exit 1
