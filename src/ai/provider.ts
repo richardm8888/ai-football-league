@@ -46,15 +46,20 @@ export class AiProviderError extends Error {
   }
 }
 
-/** Run an operation with a timeout, bounded retries and backoff. */
+/**
+ * Run an operation with a timeout, bounded retries and backoff.
+ *
+ * Each attempt is handed its own signal, so an attempt the deadline has already
+ * given up on is cancelled rather than left running alongside its replacement.
+ */
 export async function withRetries<T>(
-  operation: (attempt: number) => Promise<T>,
+  operation: (attempt: number, signal: AbortSignal) => Promise<T>,
   options: { retries: number; timeoutMs: number; onRetry?: (attempt: number, error: unknown) => void },
 ): Promise<T> {
   let lastError: unknown;
   for (let attempt = 0; attempt <= options.retries; attempt += 1) {
     try {
-      return await withTimeout(operation(attempt), options.timeoutMs);
+      return await withTimeout((signal) => operation(attempt, signal), options.timeoutMs);
     } catch (error) {
       lastError = error;
       const retryable = !(error instanceof AiProviderError) || error.retryable;
@@ -67,11 +72,34 @@ export async function withRetries<T>(
   throw lastError;
 }
 
-export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise((resolve, reject) => {
+/**
+ * Start an operation under a deadline and cancel it when the deadline passes.
+ *
+ * The operation is started here with a signal rather than passed in already in
+ * flight, because giving up on this side does nothing to the work on the other:
+ * a generation nobody is waiting for still runs to completion and is still
+ * billed, and marking the timeout retryable then stacks a second request on top
+ * of the first at exactly the moment the provider is already struggling.
+ */
+export function withTimeout<T>(start: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T> {
+  const controller = new AbortController();
+  return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
-      () => reject(new AiProviderError(`The coaching staff did not respond within ${ms}ms.`, true)), ms);
-    promise.then(
+      () => {
+        // Reject before aborting, so the manager is told about the deadline
+        // rather than about whatever the cancelled request throws on its way down.
+        reject(new AiProviderError(`The coaching staff did not respond within ${ms}ms.`, true));
+        controller.abort();
+      }, ms);
+    let pending: Promise<T>;
+    try {
+      pending = start(controller.signal);
+    } catch (error) {
+      clearTimeout(timer);
+      reject(error);
+      return;
+    }
+    pending.then(
       (value) => { clearTimeout(timer); resolve(value); },
       (error) => { clearTimeout(timer); reject(error); });
   });

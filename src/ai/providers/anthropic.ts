@@ -49,7 +49,7 @@ export class AnthropicCoachProvider implements AiProvider {
     ];
 
     const response = await withRetries(
-      async () => {
+      async (_attempt, signal) => {
         try {
           return await this.client.messages.create({
             model: this.model,
@@ -58,7 +58,7 @@ export class AnthropicCoachProvider implements AiProvider {
             tools: [PROPOSE_PLAN_TOOL as unknown as Anthropic.Tool],
             tool_choice: { type: 'tool', name: PROPOSE_PLAN_TOOL.name },
             messages,
-          });
+          }, { signal });
         } catch (error) {
           throw toProviderError(error);
         }
@@ -95,6 +95,12 @@ export class AnthropicCoachProvider implements AiProvider {
 }
 
 function toProviderError(error: unknown): AiProviderError {
+  // Nothing else aborts this request, so an abort means the deadline passed.
+  // The timeout is already on its way to the caller as a retryable error;
+  // matching it here keeps the fallback behaviour the same whichever arrives first.
+  if (error instanceof Anthropic.APIUserAbortError) {
+    return new AiProviderError('The coaching staff did not answer in time.', true, error);
+  }
   if (error instanceof Anthropic.APIError) {
     const status = error.status ?? 0;
     // Rate limits, overloads and server faults are worth another attempt.
