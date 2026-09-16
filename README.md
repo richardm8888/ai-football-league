@@ -153,7 +153,7 @@ merge becomes a running container.
 
 ```bash
 npm run dev            # development server
-npm test               # 194 tests: domain, engine, familiarity, AI, end to end
+npm test               # 244 tests: domain, engine, familiarity, AI, end to end
 npm run typecheck      # strict TypeScript, no emit
 npm run calibrate      # run 900 matches and print the statistical profile
 npm run ai:cost        # measure what one coaching request costs to send

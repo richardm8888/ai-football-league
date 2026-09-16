@@ -42,6 +42,18 @@ const CACHE_READ_MULTIPLIER = 0.1;
 const CACHE_WRITE_MULTIPLIER = 1.25;
 
 /**
+ * The shortest prefix each model will cache at all. It is not monotonic across
+ * generations, and falling below it is silent: no error, no write, everything
+ * billed at full price. That is what makes it worth keeping next to the prices
+ * rather than in a comment — a model change can switch caching off by accident.
+ */
+const MIN_CACHEABLE_PREFIX = {
+  'claude-opus-5': 512,
+  'claude-sonnet-5': 1024,
+  'claude-haiku-4-5': 4096,
+} as const;
+
+/**
  * Sending any tool makes the API prepend its own tool-use system prompt, which
  * is billed but appears nowhere in what we assemble, so it has to be added by
  * hand. The count is per model and depends on tool_choice; these are the
@@ -236,12 +248,16 @@ async function main() {
     + `${memories.length} staff notes, ${Math.min(historyRows.length, 8)} history turns.`);
   console.log(`Tokens: ${label}.  Prices as published ${PRICED_AT}, model ${MODEL}.\n`);
 
+  // Blocks are rendered compact, because that is what jsonBlock has done since
+  // #22. The pretty-printed total is still reported below it: it is the state
+  // the analysis was written against, and the only honest way to show what the
+  // change was worth is to keep measuring both with the same counter.
   const rows: Array<[string, string]> = [
     ['system prompt', COACH_SYSTEM_PROMPT],
     ['tool schema', toolJson],
     ...blocks.map((b) => [`  context: ${b.label}${b.static ? ' (static)' : ''}`,
-      dataBlock(b.label, JSON.stringify(b.value, null, 1))] as [string, string]),
-    ['context total', dynamicPretty],
+      dataBlock(b.label, JSON.stringify(b.value))] as [string, string]),
+    ['context total', dynamicCompact],
     ['staff notes', notes],
     ['manager message', managerBlock],
     ['history (8 turns)', history],
@@ -255,10 +271,28 @@ async function main() {
   // Billed, but not part of anything we send, so it has no character count.
   console.log(`${'tool-use system prompt (API)'.padEnd(w)}  ${'-'.padStart(6)}  `
     + `${String(toolUseSystem).padStart(7)}`);
-  const inputTokens = t(COACH_SYSTEM_PROMPT) + t(toolJson) + toolUseSystem
-    + t(dynamicPretty) + t(notes) + t(managerBlock) + t(history);
+  const fixed = t(COACH_SYSTEM_PROMPT) + t(toolJson) + toolUseSystem
+    + t(notes) + t(managerBlock) + t(history);
+  const inputTokens = fixed + t(dynamicCompact);
+  const inputTokensBefore = fixed + t(dynamicPretty);
+  const fixedChars = COACH_SYSTEM_PROMPT.length + toolJson.length
+    + notes.length + managerBlock.length + history.length;
+  const chars = fixedChars + dynamicCompact.length;
+  const charsBefore = fixedChars + dynamicPretty.length;
   console.log('-'.repeat(w + 18));
-  console.log(`${'WHOLE REQUEST'.padEnd(w)}  ${' '.repeat(6)}  ${String(inputTokens).padStart(7)}`);
+  console.log(`${'WHOLE REQUEST'.padEnd(w)}  ${String(chars).padStart(6)}  `
+    + `${String(inputTokens).padStart(7)}`);
+  console.log(`${'  same request before #22 (pretty-printed)'.padEnd(w)}  `
+    + `${String(charsBefore).padStart(6)}  ${String(inputTokensBefore).padStart(7)}`);
+  console.log(`${'  saved by compacting'.padEnd(w)}  `
+    + `${(((chars / charsBefore) - 1) * 100).toFixed(1).padStart(5)}%  `
+    + `${(((inputTokens / inputTokensBefore) - 1) * 100).toFixed(1).padStart(6)}%`);
+  // The context alone, which is the only part compacting touched, so it shows
+  // the change at full strength rather than diluted by the untouched prefix.
+  console.log(`${'  context alone, compact vs pretty'.padEnd(w)}  `
+    + `${(((dynamicCompact.length / dynamicPretty.length) - 1) * 100).toFixed(1).padStart(5)}%  `
+    + `${(((t(dynamicCompact) / t(dynamicPretty)) - 1) * 100).toFixed(1).padStart(6)}%`
+    + `   (${t(dynamicPretty)} -> ${t(dynamicCompact)} tokens)`);
 
   console.log('\noutput, by what the proposal actually changes');
   for (const [name, value] of Object.entries(outputs)) {
@@ -275,7 +309,11 @@ async function main() {
   const staticNow = t(COACH_SYSTEM_PROMPT) + t(toolJson) + toolUseSystem;
   const tail = t(notes) + t(managerBlock) + t(history);
   const out = t(JSON.stringify(outputs.partial));
-  const baseline = cost(inputTokens, 0, out);
+  // Everything is quoted against the pre-#22 request, because the question the
+  // table answers is what the optimisation work bought. The row marked CURRENT
+  // is what main sends today.
+  const baseline = cost(inputTokensBefore, 0, out);
+  const current = cost(t(dynamicCompact) + tail, staticNow, out);
 
   // Applied cheapest-and-safest first rather than largest first, which is the
   // order docs/AI_COSTS.md recommends and the order the marginal column means.
@@ -304,9 +342,9 @@ async function main() {
     previous = c;
   };
 
-  lever('0  current code', inputTokens, 0);
-  lever('1  compact JSON', staticNow + t(dynamicCompact) + tail, 0);
-  lever('2  + cache tools and system', t(dynamicCompact) + tail, staticNow);
+  lever('0  before #22: pretty-printed, uncached', inputTokensBefore, 0);
+  lever('1  compact JSON (#22)', staticNow + t(dynamicCompact) + tail, 0);
+  lever('2  + cached prefix (#22)  <- CURRENT', t(dynamicCompact) + tail, staticNow);
 
   const thin = thinFormations(blocks);
   lever('3  + roles and formation reference static',
@@ -323,18 +361,46 @@ async function main() {
     t(render(thinTrim.filter((b) => !b.static), false)) + tail,
     staticNow + t(render(thinTrim.filter((b) => b.static), false)) + t(formationReference));
 
-  console.log('\nsame prompt, different model');
+  // The first instruction of a sitting writes the prefix instead of reading it,
+  // so it is the one request that does not get the steady-state price.
+  const firstOfSitting = (t(dynamicCompact) + tail) * price.input / 1e6
+    + staticNow * price.input * CACHE_WRITE_MULTIPLIER / 1e6 + out * price.output / 1e6;
+  console.log(`\nthe current row again, on the first instruction of a sitting (cache write, not read)`);
+  console.log(`  $${firstOfSitting.toFixed(4)}  `
+    + `${(((firstOfSitting / baseline) - 1) * 100).toFixed(1)}% vs before #22, `
+    + `against ${(((current / baseline) - 1) * 100).toFixed(1)}% once the prefix is warm`);
+
+  // Priced on the current request, with each model's own tool-use system prompt
+  // and its own minimum cacheable prefix. A prefix below that minimum is not an
+  // error: the write silently does not happen and everything bills at full
+  // price, which is why the cheaper model and the caching work partly cancel.
+  console.log('\nsame prompt, different model (current code, warm prefix)');
   for (const [name, p] of Object.entries(PRICES)) {
-    const c = (inputTokens * p.input + out * p.output) / 1e6;
-    console.log(`  ${name.padEnd(20)} $${c.toFixed(4)}  ${(((c / baseline) - 1) * 100).toFixed(1).padStart(6)}%`);
+    const key = name as keyof typeof PRICES;
+    const modelStatic = t(COACH_SYSTEM_PROMPT) + t(toolJson) + TOOL_USE_SYSTEM_PROMPT_TOKENS[key];
+    const caches = modelStatic >= MIN_CACHEABLE_PREFIX[key];
+    const dyn = t(dynamicCompact) + tail;
+    const c = (caches
+      ? (dyn * p.input + modelStatic * p.input * CACHE_READ_MULTIPLIER + out * p.output)
+      : ((dyn + modelStatic) * p.input + out * p.output)) / 1e6;
+    console.log(`  ${name.padEnd(20)} $${c.toFixed(4)}  `
+      + `${(((c / current) - 1) * 100).toFixed(1).padStart(6)}% vs current  `
+      + `${caches ? 'caches' : `NO CACHE (prefix ${modelStatic} < ${MIN_CACHEABLE_PREFIX[key]} minimum)`}`);
   }
 
   console.log('\nretries: AI_MAX_RETRIES defaults to 2, so a request can be sent three times');
+  // A retry follows within seconds, so the prefix it re-sends is still warm:
+  // the first attempt writes it and the other two read it.
+  const dynamicNow = t(dynamicCompact) + tail;
+  const threeAttempts = (dynamicNow * 3 * price.input
+    + staticNow * price.input * CACHE_WRITE_MULTIPLIER
+    + staticNow * 2 * price.input * CACHE_READ_MULTIPLIER
+    + out * price.output) / 1e6;
   console.log(`  three attempts, the last one succeeding: `
-    + `$${(cost(inputTokens * 3, 0, out)).toFixed(4)}  `
-    + `${(cost(inputTokens * 3, 0, out) / baseline).toFixed(2)}x one clean attempt`);
-  console.log(`  a generation abandoned by the 45s timeout is still billed, `
-    + `up to max_tokens: $${cost(inputTokens, 0, 3000).toFixed(4)}`);
+    + `$${threeAttempts.toFixed(4)}  ${(threeAttempts / current).toFixed(2)}x one clean attempt`);
+  console.log(`  a generation abandoned by the 45s timeout is still billed, up to max_tokens: `
+    + `$${cost(dynamicNow, staticNow, 3000).toFixed(4)} `
+    + `(#21 now aborts it, so this is what was being paid before)`);
 
   console.log('\nseason totals: 8 managers, 14 matchdays');
   const scenarios = [
@@ -347,19 +413,33 @@ async function main() {
   const step3Static = staticNow + t(render(thin.filter((b) => b.static), false)) + t(formationReference);
   const step5Dynamic = t(render(thinTrim.filter((b) => !b.static), false));
   const step5Static = staticNow + t(render(thinTrim.filter((b) => b.static), false)) + t(formationReference);
-  console.log(`${'scenario'.padEnd(10)} ${'instr'.padStart(6)} ${'now'.padStart(9)} `
-    + `${'steps 1-2'.padStart(10)} ${'steps 1-5'.padStart(10)}`);
+  console.log(`${'scenario'.padEnd(10)} ${'instr'.padStart(6)} ${'before #22'.padStart(11)} `
+    + `${'now'.padStart(9)} ${'+ steps 3-5'.padStart(12)}`);
   for (const s2 of scenarios) {
     const n = s2.perMatchday * 14 * 8;
     const scenarioTail = t(notes) + t(managerBlock) + Math.round(t(history) * (s2.historyTurns / 8));
-    const now = cost(staticNow + t(dynamicPretty) + scenarioTail, 0, s2.out) * n;
-    const s12 = cost(t(dynamicCompact) + scenarioTail, staticNow, s2.out) * n;
-    const s15 = cost(step5Dynamic - tail + scenarioTail, step5Static, s2.out) * n;
+    const before = cost(staticNow + t(dynamicPretty) + scenarioTail, 0, s2.out) * n;
+    const nowCost = cost(t(dynamicCompact) + scenarioTail, staticNow, s2.out) * n;
+    const s35 = cost(step5Dynamic - tail + scenarioTail, step5Static, s2.out) * n;
     console.log(`${s2.name.padEnd(10)} ${String(n).padStart(6)} `
-      + `${('$' + now.toFixed(2)).padStart(9)} ${('$' + s12.toFixed(2)).padStart(10)} `
-      + `${('$' + s15.toFixed(2)).padStart(10)}`);
+      + `${('$' + before.toFixed(2)).padStart(11)} ${('$' + nowCost.toFixed(2)).padStart(9)} `
+      + `${('$' + s35.toFixed(2)).padStart(12)}`);
   }
-  void step3Static;
+
+  // What lever 3 would do to the cacheable prefix, which is the whole point of
+  // it: the tokens do not go away, they move to the tenth-price side. Printed
+  // because it is also the number that decides whether a cheaper model could
+  // still cache at all.
+  console.log(`\nstatic prefix: ${staticNow} tokens now, ${step3Static} after lever 3 `
+    + `(${((staticNow / inputTokens) * 100).toFixed(0)}% of the request now, `
+    + `${((step3Static / (step3Static + t(render(thin.filter((b) => !b.static), false)) + tail)) * 100).toFixed(0)}% after)`);
+  for (const [name] of Object.entries(PRICES)) {
+    const key = name as keyof typeof PRICES;
+    const modelStatic = t(COACH_SYSTEM_PROMPT) + t(toolJson) + TOOL_USE_SYSTEM_PROMPT_TOKENS[key];
+    console.log(`  ${name.padEnd(20)} prefix ${String(modelStatic).padStart(5)}, `
+      + `minimum ${String(MIN_CACHEABLE_PREFIX[key]).padStart(5)}  `
+      + `${modelStatic >= MIN_CACHEABLE_PREFIX[key] ? 'caches' : 'does not cache'}`);
+  }
 
   console.log(`\ncache break-even on the ${staticNow}-token static prefix`);
   console.log('  a write costs 1.25x input, a read 0.1x, and an entry lives five minutes');
