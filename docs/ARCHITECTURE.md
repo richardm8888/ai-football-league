@@ -133,6 +133,16 @@ request that misses its deadline is cancelled rather than merely stopped waiting
 on, so the generation is not billed in full and a retry replaces its predecessor
 instead of stacking on top of one still running.
 
+It also owns what a request costs. The system prompt and the tool schema are the
+only part of a request that never varies, so both carry a cache breakpoint and
+are billed at a tenth on a repeat within five minutes. Because the prefix says
+nothing about any particular club, it is the same bytes for the whole league and
+any manager's request warms it for all of them. The context blocks are
+serialised compactly for the same reason: indentation in the squad block alone
+was about a third of the context. What each call actually cost is recorded on
+the `AiDecision` row it produced, which is also the only way a cache that has
+quietly stopped matching would ever be noticed.
+
 The **local coach** is a deterministic, rule-based assistant that reads the
 manager's instruction, the squad and the public opponent profile and returns the
 same kind of structured proposal. It exists for three reasons: the game must be

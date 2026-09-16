@@ -366,3 +366,31 @@ inside it and trap the dialog inside the header.
   dependencies of the latest Next 15 and Vitest 3 releases, and both affecting
   development servers rather than production. Clearing them requires major
   upgrades that were out of scope.
+
+## 23. The static prefix is cached, and only for five minutes
+
+The system prompt and the tool schema carry a `cache_control` breakpoint each.
+The time to live is the five-minute default, not the hour.
+
+**Why.** They are the only genuinely static part of a coaching request, about
+1,750 tokens re-sent on every instruction, and a cache read costs a tenth of
+what a fresh read does. The prefix is also club-independent, which was a
+fairness decision rather than a cost one, and it means the eight managers in a
+league share one cache entry. Around a deadline they play in the same evening,
+which is exactly when the entry is warm.
+
+The hourly TTL was rejected on arithmetic. A cache write costs 1.25 times a
+normal read, and the hourly one doubles that, so it needs three reads to repay
+itself where the five-minute entry needs two. A league of eight friends does not
+reliably send three instructions an hour.
+
+**Cost.** A manager who sends two instructions an hour apart pays the write
+twice and reads neither, which is about a fifth of a cent worse than not
+caching at all. Worth it for the case where somebody sits down and works through
+their week in one go, which is how the game is actually played.
+
+Prompt caching also fails silently: a prefix that stops matching is billed at
+full price with no error. Two things guard against that. `tests/ai/caching.test.ts`
+asserts the breakpoints are present and that the prefix is byte-identical across
+clubs, and the cache counters on `AiDecision` make a cache that has stopped
+working visible in the data rather than only in the bill.

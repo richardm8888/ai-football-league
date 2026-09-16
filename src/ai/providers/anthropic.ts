@@ -3,9 +3,50 @@ import { coachProposalSchema } from '@/domain/schemas';
 import { env } from '@/lib/env';
 import { buildContextPrompt, COACH_SYSTEM_PROMPT, PROPOSE_PLAN_TOOL } from '../prompt';
 import {
-  AiProviderError, withRetries, type AiProvider, type CoachRequest, type CoachResult,
+  AiProviderError, withRetries,
+  type AiProvider, type CoachRequest, type CoachResult, type CoachUsage,
 } from '../provider';
 import { clean, dataBlock } from '../sanitize';
+
+/**
+ * The static prefix of every coaching request, marked for caching.
+ *
+ * The system prompt and the tool schema are the only part of a request that
+ * never varies, and they are re-sent in full on every instruction. Caching
+ * reprices them at a tenth, and because the prefix says nothing about any
+ * particular club — a deliberate fairness property — it is the same bytes for
+ * the whole league, so any manager's request warms the cache for all of them.
+ * Around a deadline, when the match will not play until everyone has locked in,
+ * managers cluster in the same evening and the hit rate should be good.
+ *
+ * Five minutes, not an hour. A write costs 1.25x input and the hourly TTL
+ * doubles that, which needs three reads to repay rather than two, and traffic
+ * this sparse will not reliably get them. A manager sending two instructions an
+ * hour apart pays the write twice and reads neither; that is a fifth of a cent,
+ * and cheaper than the hourly write would be.
+ *
+ * Two breakpoints rather than one. Requests render as tools, then system, then
+ * messages, so the breakpoint on the system prompt already covers both. The
+ * second one, at the end of the tool schema, means editing the system prompt —
+ * which happens on a deploy, not per request — does not also throw away the
+ * larger tool schema entry.
+ *
+ * There is no error if this stops working: a broken prefix, or a prefix shorter
+ * than the model's minimum cacheable length, is billed silently at full price.
+ * The prefix is comfortably over the minimum on the default model, but not on
+ * every model a league could be pointed at, so the cache counters on AiDecision
+ * are the only way this gets noticed.
+ */
+const CACHE_BREAKPOINT: Anthropic.CacheControlEphemeral = { type: 'ephemeral', ttl: '5m' };
+
+const CACHED_TOOL: Anthropic.Tool = {
+  ...(PROPOSE_PLAN_TOOL as unknown as Anthropic.Tool),
+  cache_control: CACHE_BREAKPOINT,
+};
+
+const CACHED_SYSTEM: Anthropic.TextBlockParam[] = [
+  { type: 'text', text: COACH_SYSTEM_PROMPT, cache_control: CACHE_BREAKPOINT },
+];
 
 /**
  * The Anthropic provider.
@@ -54,8 +95,8 @@ export class AnthropicCoachProvider implements AiProvider {
           return await this.client.messages.create({
             model: this.model,
             max_tokens: 3000,
-            system: COACH_SYSTEM_PROMPT,
-            tools: [PROPOSE_PLAN_TOOL as unknown as Anthropic.Tool],
+            system: CACHED_SYSTEM,
+            tools: [CACHED_TOOL],
             tool_choice: { type: 'tool', name: PROPOSE_PLAN_TOOL.name },
             messages,
           }, { signal });
@@ -88,10 +129,29 @@ export class AnthropicCoachProvider implements AiProvider {
       provider: this.name,
       model: this.model,
       latencyMs: Date.now() - started,
+      usage: toUsage(response.usage),
       fallbackUsed: false,
       warnings,
     };
   }
+}
+
+/**
+ * What the request actually cost, recorded so the cost of running a league is a
+ * measurement rather than an estimate. The cache counters are the only way to
+ * tell whether caching is working: a broken prefix does not raise an error, it
+ * just quietly bills everything at full price.
+ *
+ * The cache fields are null when the request used no caching at all, which is
+ * not the same as a cache miss, but both are zero tokens for costing purposes.
+ */
+function toUsage(usage: Anthropic.Usage): CoachUsage {
+  return {
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    cacheCreationInputTokens: usage.cache_creation_input_tokens ?? 0,
+    cacheReadInputTokens: usage.cache_read_input_tokens ?? 0,
+  };
 }
 
 function toProviderError(error: unknown): AiProviderError {
