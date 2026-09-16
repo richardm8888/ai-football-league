@@ -71,6 +71,29 @@ do next, never acted on directly.
 To propose work, open an issue or comment on one and say so. Adding the `agent`
 label is the owner's signal to begin, and it is theirs to give.
 
+### Close what is no longer worth doing
+
+An `agent` issue that is already complete or no longer relevant gets **closed**,
+not started and not handed back for a decision. The label says the owner wants
+it dealt with; closing it is a way of dealing with it.
+
+Most of these are issues overtaken by events. This project moves faster than its
+tracker: an issue written a fortnight ago can describe a problem three merged
+pull requests have since solved, and its opening line is then simply false.
+Spawning a session against a stale premise produces a duplicate of something
+that already works, which costs more than the issue was ever worth.
+
+So read what an issue actually asks for against what the code now does, before
+briefing anybody. Check its claims rather than trusting its framing - a stale
+issue reads exactly like a live one. When closing, say which pull requests
+delivered it and match them to the issue's own list, so the judgement can be
+checked rather than taken on trust, and reopening is easy if the reading was
+wrong.
+
+Partly-done is not done. If a real part remains, close the stale issue and open
+a narrow one for what is genuinely left, rather than keeping a misleading issue
+alive to carry a fraction of itself.
+
 ## Each cycle
 
 Waking happens two ways: a pull request event arrives, or a scheduled Routine
