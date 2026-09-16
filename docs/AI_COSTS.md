@@ -10,9 +10,11 @@ in `src/lib/env.ts`: `claude-sonnet-5`, `AI_MAX_RETRIES=2`, `AI_TIMEOUT_MS=45000
 
 ## The short answer
 
-A season of eight friends costs somewhere between **five and forty dollars**,
-and about **thirteen** if they use it the way it is meant to be used. Per
-instruction it is two to three cents. This is affordable to the point where the
+A season of eight friends costs somewhere between **six and fifty dollars**,
+and about **fourteen** if they use it the way it is meant to be used. Per
+instruction it is two to four cents. The wide band is mostly how much the
+managers talk to their staff; the rest is tokeniser uncertainty, explained
+below. This is affordable to the point where the
 interesting question is not whether to turn it on but whether anything is worth
 optimising at all. Two of the levers below are, because they are nearly free to
 make; the rest are real and not worth the churn at this bill.
@@ -62,7 +64,14 @@ is worth about 135 tokens.)
 | Staff notes | 200 | 59 |
 | Manager message | 134 | 33 |
 | History, eight turns | 1,796 | 430 |
-| **Whole request** | **25,391** | **8,491** |
+| Tool-use system prompt, added by the API | — | 474 |
+| **Whole request** | **25,391** | **8,965** |
+
+That last row is billed but is not part of anything the app assembles. Sending
+any tool at all makes the API prepend its own tool-use system prompt, and
+forcing the choice with `tool_choice` costs more than leaving it automatic —
+474 tokens against 354 on this model. It is invisible in the source, so it has
+to be added by hand from the published per-model table.
 
 Output depends entirely on what the proposal actually changes, and `max_tokens`
 of 3,000 is never close to being reached:
@@ -73,23 +82,44 @@ of 3,000 is never close to being reached:
 | Tactics and training, no line-up | 631 |
 | Tactics, line-up and training | 1,176 |
 
-### A caveat about the token counts
+### A caveat about the token counts, and it cuts both ways
 
 The tokeniser for current models cannot be run offline, and this analysis was
 done without an API key. The counts above come from the legacy Anthropic BPE,
-which is the right family of tokeniser but an older generation of it. Modern
-vocabularies split this kind of dense JSON into slightly fewer tokens, so every
-figure here is a ceiling rather than a point estimate — if it is wrong it is
-wrong in the direction of overstating the bill, which is the safe direction for
-a decision about whether to switch the key on.
+which is a real tokeniser of the right family but the wrong generation.
+
+**The error does not run in a knowable direction.** Claude 4.7 and later models
+use a newer tokeniser that produces roughly 30% more tokens for the same text
+than the one used by Sonnet 4.6 and earlier. Sonnet 5 is on the newer one. How
+the legacy Claude 1/2 BPE measured here compares to either is not published, so
+a count taken from it can as easily be under as over — and the direction of the
+known change is upward.
+
+Treat the figures as the middle of a band, not a ceiling. At 30% above the
+measured counts a typical instruction is $0.0312 rather than $0.0242, and a
+typical season $17.49 rather than $13.57:
+
+| | As measured | 30% higher |
+| --- | ---: | ---: |
+| Typical instruction | $0.0242 | $0.0312 |
+| Light season | $5.90 | $7.79 |
+| Typical season | $13.57 | $17.49 |
+| Heavy season | $37.65 | $48.46 |
+
+Nothing in the recommendation changes across that band, which is the only
+reason it is acceptable to leave it open: the worst case is still under fifty
+dollars for a whole season, and the ranking of the levers is unaffected because
+they all scale with it.
 
 Set `ANTHROPIC_API_KEY` and `npm run ai:cost` uses the `count_tokens` endpoint
-instead and prints exact figures. That endpoint does not run inference and costs
-nothing to call, so re-checking this document is free.
+instead and prints exact figures. That endpoint does not run inference and
+costs nothing to call, so closing this gap is free and worth doing before
+anyone relies on a precise number.
 
 A flat characters-per-token divisor was rejected deliberately: it is wrong by
-enough to matter here. The same divisor cannot serve prose at 4.7 characters per
-token and pretty-printed JSON at 2.7, and this request is mostly the latter.
+enough to matter here. The same divisor cannot serve prose at 4.7 characters
+per token and pretty-printed JSON at 2.7, and this request is mostly the
+latter.
 
 ## Cost per instruction
 
@@ -98,19 +128,19 @@ tokens, as published on 2026-06-24. Prices move; `PRICES` in
 `scripts/ai-cost.ts` is the one place to change them.
 
 ```
-input    8,491 tokens  x  $2.00 / 1,000,000  =  $0.016982
+input    8,965 tokens  x  $2.00 / 1,000,000  =  $0.017930
 output     631 tokens  x  $10.00 / 1,000,000 =  $0.006310
                                                 ---------
-one instruction that sets tactics and training  $0.023292
+one instruction that sets tactics and training  $0.024240
 ```
 
 | Instruction | Input | Output | Cost |
 | --- | ---: | ---: | ---: |
-| A question, answered with advice | $0.0170 | $0.0027 | **$0.0197** |
-| Tactics and training | $0.0170 | $0.0063 | **$0.0233** |
-| Tactics, line-up and training | $0.0170 | $0.0118 | **$0.0287** |
+| A question, answered with advice | $0.0179 | $0.0027 | **$0.0206** |
+| Tactics and training | $0.0179 | $0.0063 | **$0.0242** |
+| Tactics, line-up and training | $0.0179 | $0.0118 | **$0.0297** |
 
-Input is 73% of a typical instruction. That is the shape of this workload and it
+Input is 74% of a typical instruction. That is the shape of this workload and it
 is why every lever worth pulling acts on the request rather than the response.
 
 ## Cost per manager, per league, per season
@@ -127,13 +157,13 @@ shape, changes their mind, and asks again.
 
 | | Per matchday | Instructions/season | Per manager/matchday | League/season |
 | --- | ---: | ---: | ---: | ---: |
-| Light | 2 | 224 | $0.051 | **$5.68** |
-| Typical | 5 | 560 | $0.116 | **$13.04** |
-| Heavy | 15 | 1,680 | $0.322 | **$36.06** |
+| Light | 2 | 224 | $0.053 | **$5.90** |
+| Typical | 5 | 560 | $0.121 | **$13.57** |
+| Heavy | 15 | 1,680 | $0.336 | **$37.65** |
 
 ```
-typical:  5 instructions  x  $0.02328  =  $0.1164 per manager per matchday
-          $0.1164  x  14 matchdays  x  8 managers  =  $13.04
+typical:  5 instructions  x  $0.02424  =  $0.1212 per manager per matchday
+          $0.1212  x  14 matchdays  x  8 managers  =  $13.57
 ```
 
 The scenarios differ in output mix as well as volume, which is why the cost per
@@ -153,11 +183,11 @@ partly claim the same tokens.
 
 | | Lever | Saving | Effort |
 | --- | --- | ---: | --- |
-| 1 | Stop pretty-printing the context JSON | 18.7pt | one line |
-| 2 | Prompt caching on the tool schema and system prompt | 13.5pt | an hour |
-| 3 | Move the roles and formation reference into the cached prefix | 6.5pt | an hour |
-| 4 | Short player IDs | 2.3pt | half a day, some risk |
-| 5 | Trimmed squad fields | 1.4pt | an hour, some risk |
+| 1 | Stop pretty-printing the context JSON | 18.0pt | one line |
+| 2 | Prompt caching on the tool schema and system prompt | 16.5pt | an hour |
+| 3 | Move the roles and formation reference into the cached prefix | 6.3pt | an hour |
+| 4 | Short player IDs | 2.2pt | half a day, some risk |
+| 5 | Trimmed squad fields | 1.3pt | an hour, some risk |
 | — | A cheaper model | 50% | small change, real quality risk |
 | — | Retry and timeout hygiene | nothing on average | half a day |
 
@@ -165,38 +195,44 @@ They compose, and the compounding matters more than any one of them:
 
 | Applied in order | Input tokens | Cost | Change |
 | --- | ---: | ---: | ---: |
-| Current code | 8,491 | $0.0233 | — |
-| 1 compact JSON | 6,313 | $0.0189 | −18.7% |
-| 2 + cache the tool schema and system prompt | 6,313 | $0.0158 | −32.2% |
-| 3 + roles and formation reference made static | 6,378 | $0.0143 | −38.7% |
-| 4 + short player IDs | 6,107 | $0.0137 | −41.1% |
-| 5 + trimmed squad fields | 5,945 | $0.0134 | −42.5% |
+| Current code | 8,965 | $0.0242 | — |
+| 1 compact JSON | 6,787 | $0.0199 | −18.0% |
+| 2 + cache the tool schema and system prompt | 6,787 | $0.0159 | −34.5% |
+| 3 + roles and formation reference made static | 6,852 | $0.0144 | −40.7% |
+| 4 + short player IDs | 6,581 | $0.0138 | −43.0% |
+| 5 + trimmed squad fields | 6,419 | $0.0135 | −44.3% |
 
 Step 3 raises the input token count slightly while lowering the cost, which is
 the point: the tokens move from the part of the request billed at full price to
 the part billed at a tenth.
 
-Across a season, the whole stack is worth about six dollars on typical use:
+Across a season, the whole stack is worth about seven dollars on typical use:
 
 | | Instructions | Now | After steps 1–2 | After steps 1–5 |
 | --- | ---: | ---: | ---: | ---: |
-| Light | 224 | $5.68 | $4.00 | $3.23 |
-| Typical | 560 | $13.04 | $8.84 | $6.92 |
-| Heavy | 1,680 | $36.06 | $23.46 | $17.69 |
+| Light | 224 | $5.90 | $4.02 | $3.26 |
+| Typical | 560 | $13.57 | $8.90 | $6.97 |
+| Heavy | 1,680 | $37.65 | $23.61 | $17.85 |
 
-### Prompt caching is worth doing, but it is not the biggest lever
+### Prompt caching is worth nearly as much as the biggest lever
 
 There is no `cache_control` anywhere in `src/ai`. That is confirmed, not
 assumed: nothing in the source, the tests or the deployment config mentions it,
 and the SDK is constructed with no caching options. The system prompt and tool
 schema are re-sent and re-billed in full on every single request.
 
-They are also the only genuinely static part of the prompt, and they come to
-1,747 tokens — **21% of the input**. Caching reprices that fifth at a tenth of
-the price, which is a 13.5% saving on a typical instruction. Worth having, and
-it stays on once it is on, but the reason it is not transformative here is that
-this workload is mostly unique per-request payload. The squad, the table, the
+They are also the only genuinely static part of the prompt, and with the
+tool-use system prompt the API adds on top they come to 2,221 tokens — **25% of
+the input**. Caching reprices that quarter at a tenth of the price, which is a
+16.5% saving on a typical instruction. The reason it is not larger is that this
+workload is mostly unique per-request payload: the squad, the table, the
 scouting and the plan change every week and cannot be cached at any price.
+
+The forced `tool_choice` helps here in a small way. It costs 120 tokens more
+per request than leaving the choice automatic, but those tokens are part of the
+static prefix, so once caching is on they are billed at a tenth. Keeping the
+constraint is the right call for its own sake — it is what makes the proposal
+the only thing the model can emit — and it is nearly free.
 
 Two things about caching are specific to this app and easy to get wrong.
 
@@ -213,11 +249,11 @@ pays the write twice and never reads it:
 
 | Instructions | Sittings | Cached | Uncached | |
 | ---: | ---: | ---: | ---: | ---: |
-| 2 | 1 | $0.0047 | $0.0070 | −33% |
-| 2 | 2 | $0.0087 | $0.0070 | **+25%** |
-| 5 | 2 | $0.0098 | $0.0175 | −44% |
-| 15 | 2 | $0.0133 | $0.0524 | −75% |
-| 15 | 3 | $0.0173 | $0.0524 | −67% |
+| 2 | 1 | $0.0060 | $0.0089 | −32% |
+| 2 | 2 | $0.0111 | $0.0089 | **+25%** |
+| 5 | 2 | $0.0124 | $0.0222 | −44% |
+| 15 | 2 | $0.0169 | $0.0666 | −75% |
+| 15 | 3 | $0.0220 | $0.0666 | −67% |
 
 The surcharge is a fifth of a cent and not a reason to skip caching. It is a
 reason not to reach for the one-hour TTL, which doubles the write cost and needs
@@ -229,9 +265,10 @@ three reads to repay itself — traffic this sparse will not always get them.
 Nothing downstream depends on that whitespace; the model reads compact JSON just
 as well. Dropping the indent takes the context from 6,222 tokens to 4,044.
 
-That is a **35% reduction in the context and 18.7% off the whole instruction,
-from deleting one argument.** It saves more than prompt caching does, for
-essentially no work and no risk. It is a larger saving in tokens than in
+That is a **35% reduction in the context and 18.0% off the whole instruction,
+from deleting one argument.** It edges out prompt caching — 18.0 points against
+16.5 — but the two are close enough that the ordering is not the point. Do this
+one first because it is one line and cannot fail, not because it saves more. It is a larger saving in tokens than in
 characters — 35% against 20% — because each newline and run of leading spaces
 becomes its own token, and the squad block currently puts every attribute of
 every player on a line of its own.
@@ -259,7 +296,7 @@ from `status`, which already reads `available`, `injured: …` or
 abbreviations the football world already uses — `ovr`, `fit`, `shp` — saves
 another 162 tokens.
 
-Together they are worth 3.7 points of an instruction. They are listed last among
+Together they are worth 3.5 points of an instruction. They are listed last among
 the input levers because they are the only ones that carry risk, and at this
 bill they do not repay it.
 
@@ -270,8 +307,8 @@ request, for every club, forever. So is the `label` and `description` of every
 formation. They sit in the message body, after the cacheable prefix, so they are
 re-billed every time.
 
-Moving them above the cache breakpoint takes the static prefix from 1,747
-tokens to 2,665 — from 20.6% of the input to 31.4% — while the per-formation
+Moving them above the cache breakpoint takes the static prefix from 2,221
+tokens to 3,139 — from a quarter of the input to 35% — while the per-formation
 familiarity numbers, which do vary, stay in the dynamic part. This is the one
 place where the fix is structural rather than a tweak: `buildContextPrompt`
 currently returns a single string, and it would need to return the static and
@@ -291,8 +328,9 @@ There is no eval for advice quality, so a model swap would be an unmeasurable
 change to the only part of the game the AI is actually for.
 
 **Caching would silently stop working.** Haiku 4.5's minimum cacheable prefix is
-4,096 tokens. The static prefix is 1,747, or 2,665 after step 3 — both below
-it. There is no error for this; `cache_creation_input_tokens` just comes back
+4,096 tokens. The static prefix is 2,221, or 3,139 after step 3 — both below
+it. Haiku 4.5 also needs 588 tokens for its own forced-tool system prompt
+rather than 474, so a little of the saving goes straight back. There is no error for this; `cache_creation_input_tokens` just comes back
 zero. So the model swap and the caching work are partly mutually exclusive, and
 the combined saving is less than either figure suggests.
 
@@ -300,21 +338,21 @@ the combined saving is less than either figure suggests.
 for.** Reading a squad, weighing familiarity against a scouting estimate and
 explaining the trade-off in football language is the whole product. If a model
 tier were to change, it should be because a season of real use showed the advice
-was good enough at the cheaper tier, not because it saved six dollars.
+was good enough at the cheaper tier, not because it saved seven dollars.
 
 Routing simple instructions — "who is injured?" — to a cheaper model is more
 defensible, since those are the ones with the least judgement in them. It is
 still a per-instruction classifier that has to be right, to save about a cent a
 time. Not now.
 
-For completeness in the other direction: Claude Opus 5 would cost $0.0582 an
-instruction, or $33 a season typical and $90 heavy. Also affordable, and a
+For completeness in the other direction: Claude Opus 5 would cost $0.0606 an
+instruction, or $34 a season typical and $94 heavy. Also affordable, and a
 reasonable thing to try if the advice ever feels thin.
 
 ### The retry policy is fine. The timeout is not.
 
 `AI_MAX_RETRIES` defaults to 2, so a request can be sent three times. A fully
-retried instruction costs $0.0573 against $0.0233, or **2.5×**, because each
+retried instruction costs $0.0601 against $0.0242, or **2.5×**, because each
 attempt re-sends the whole input and only the last one produces output. That is
 the correct trade: retries fire on 429s, 408s and 5xx, a manager who gets no
 answer is a manager blocked before a deadline, and the local coach is waiting
@@ -338,7 +376,7 @@ generation takes longer than 45 seconds, three things happen: the request runs t
 completion on the server and is billed in full, the result is thrown away, and a
 second request is immediately sent that stacks on top of the first. In the worst
 case one instruction pays for three complete generations and the manager is
-served by the local coach anyway. At `max_tokens` that is up to $0.0470 per
+served by the local coach anyway. At `max_tokens` that is up to $0.0479 per
 abandoned attempt.
 
 This is worth fixing because a request that is billed and discarded is a bug, not
@@ -354,7 +392,7 @@ be used.
 **Effort and thinking budgets** are not set, and Sonnet 5 runs adaptive thinking
 by default. Lowering effort is the conventional first tradeoff, but this is a
 single-shot call with a small output and nothing here suggests reasoning depth is
-where the tokens are going. The measurement says input is 73% of the bill.
+where the tokens are going. The measurement says input is 74% of the bill.
 
 **Context editing and compaction** need long accumulating loops. There is no
 loop.
@@ -369,14 +407,14 @@ measurement, and it is a smaller change than any of the levers.
 
 1. **Pass an `AbortSignal` into `messages.create`.** Not a saving — a bug. A
    timed-out request should stop costing money.
-2. **Drop the `null, 1` from `jsonBlock`.** One line, 18.7% off every
+2. **Drop the `null, 1` from `jsonBlock`.** One line, 18.0% off every
    instruction, no risk.
 3. **Log `response.usage` on every proposal.** So the next version of this
    document contains measurements instead of a ceiling.
-4. **Add `cache_control` to the tool schema and system prompt.** An hour, 13.5%,
-   and it compounds with (2) to 32%.
+4. **Add `cache_control` to the tool schema and system prompt.** An hour, 16.5%,
+   and it compounds with (2) to 34.5%.
 
-That is a morning's work for 32% and one real bug closed. Stop there. Steps 3
+That is a morning's work for 34.5% and one real bug closed. Stop there. Steps 3
 to 5 in the table above are correct and they are not worth the churn at this
 bill; revisit them if a league ever turns out to send ten times more
 instructions than modelled here.

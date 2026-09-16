@@ -41,6 +41,19 @@ const PRICED_AT = '2026-06-24';
 const CACHE_READ_MULTIPLIER = 0.1;
 const CACHE_WRITE_MULTIPLIER = 1.25;
 
+/**
+ * Sending any tool makes the API prepend its own tool-use system prompt, which
+ * is billed but appears nowhere in what we assemble, so it has to be added by
+ * hand. The count is per model and depends on tool_choice; these are the
+ * published figures for a forced choice, which is what the provider uses.
+ * Check the pricing page's tool-use table when changing model.
+ */
+const TOOL_USE_SYSTEM_PROMPT_TOKENS = {
+  'claude-opus-5': 406,
+  'claude-sonnet-5': 474,
+  'claude-haiku-4-5': 588,
+} as const;
+
 const MODEL = (process.env.AI_MODEL ?? 'claude-sonnet-5') as keyof typeof PRICES;
 
 /** What a manager actually types, at the length they type it. */
@@ -61,11 +74,12 @@ const INSTRUCTIONS = [
  * The offline counter, used when there is no API key.
  *
  * This is the Claude 1/2 BPE: a real tokeniser of the right family but the
- * wrong generation. Larger modern vocabularies split dense JSON into slightly
- * fewer tokens, so every figure it produces is a ceiling rather than a point
- * estimate. That is the safe direction to be wrong in for a decision about
- * whether to switch a paid provider on, but it is not a substitute for
- * count_tokens, which is exact, model-specific and free to call.
+ * wrong generation, and the error does not run in a knowable direction. Claude
+ * 4.7 and later use a newer tokeniser that produces roughly 30% more tokens for
+ * the same text than the 4.6-and-earlier one, so a count taken here can as
+ * easily be under as over. Treat it as an order of magnitude and use
+ * count_tokens, which is exact, model-specific and free to call, for anything
+ * that matters.
  */
 const localCount = (text: string) => (text.length ? countTokens(text) : 0);
 
@@ -195,6 +209,7 @@ async function main() {
   const withSquad = (squad: unknown) => blocks.map((b) => (b.label === 'squad' ? { ...b, value: squad } : b));
 
   const toolJson = JSON.stringify(PROPOSE_PLAN_TOOL);
+  const toolUseSystem = TOOL_USE_SYSTEM_PROMPT_TOKENS[MODEL];
 
   const strings = new Set<string>([
     COACH_SYSTEM_PROMPT, toolJson, dynamicPretty, dynamicCompact, notes, managerBlock, history,
@@ -210,7 +225,7 @@ async function main() {
   const measured = await apiCounts(strings);
   const label = measured
     ? `count_tokens against ${MODEL} (exact)`
-    : 'legacy Anthropic BPE (a ceiling; set ANTHROPIC_API_KEY for exact counts)';
+    : 'legacy Anthropic BPE (indicative only; set ANTHROPIC_API_KEY for exact counts)';
   const counts = measured ?? new Map([...strings].map((text) => [text, localCount(text)]));
   const t = (text: string) => counts.get(text) ?? localCount(text);
 
@@ -237,8 +252,11 @@ async function main() {
   for (const [label, text] of rows) {
     console.log(`${label.padEnd(w)}  ${String(text.length).padStart(6)}  ${String(t(text)).padStart(7)}`);
   }
-  const inputTokens = t(COACH_SYSTEM_PROMPT) + t(toolJson) + t(dynamicPretty)
-    + t(notes) + t(managerBlock) + t(history);
+  // Billed, but not part of anything we send, so it has no character count.
+  console.log(`${'tool-use system prompt (API)'.padEnd(w)}  ${'-'.padStart(6)}  `
+    + `${String(toolUseSystem).padStart(7)}`);
+  const inputTokens = t(COACH_SYSTEM_PROMPT) + t(toolJson) + toolUseSystem
+    + t(dynamicPretty) + t(notes) + t(managerBlock) + t(history);
   console.log('-'.repeat(w + 18));
   console.log(`${'WHOLE REQUEST'.padEnd(w)}  ${' '.repeat(6)}  ${String(inputTokens).padStart(7)}`);
 
@@ -254,7 +272,7 @@ async function main() {
     (uncachedIn * price.input + cachedIn * price.input * CACHE_READ_MULTIPLIER
       + out * price.output) / 1e6;
 
-  const staticNow = t(COACH_SYSTEM_PROMPT) + t(toolJson);
+  const staticNow = t(COACH_SYSTEM_PROMPT) + t(toolJson) + toolUseSystem;
   const tail = t(notes) + t(managerBlock) + t(history);
   const out = t(JSON.stringify(outputs.partial));
   const baseline = cost(inputTokens, 0, out);
