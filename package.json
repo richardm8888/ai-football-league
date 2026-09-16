@@ -20,7 +20,8 @@
     "pg:start": "bash scripts/local-postgres.sh start",
     "pg:stop": "bash scripts/local-postgres.sh stop",
     "check:mobile": "node scripts/mobile-check.mjs",
-    "calibrate": "tsx scripts/calibrate.ts"
+    "calibrate": "tsx scripts/calibrate.ts",
+    "ai:cost": "tsx scripts/ai-cost.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -34,6 +35,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@anthropic-ai/tokenizer": "^0.0.4",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/node": "^22.9.0",
     "@types/react": "^19.0.0",
