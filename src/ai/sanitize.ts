@@ -70,6 +70,13 @@ export function dataBlock(label: string, content: string): string {
   return `<data name="${label}">\n${content}\n</data>`;
 }
 
+/**
+ * Serialise compactly. Indentation is the single most expensive thing in a
+ * coaching request: every newline and run of leading spaces is its own token,
+ * and the squad block puts every attribute of every player on its own line, so
+ * pretty-printing the context costs about a third of it for nothing. The model
+ * reads compact JSON just as well, and nothing downstream reads this text.
+ */
 export function jsonBlock(label: string, value: unknown): string {
-  return dataBlock(label, JSON.stringify(value, null, 1));
+  return dataBlock(label, JSON.stringify(value));
 }

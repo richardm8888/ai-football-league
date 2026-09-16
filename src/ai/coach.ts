@@ -139,6 +139,10 @@ export async function askCoach(input: {
   // Log each proposal separately: a manager may accept the training and reject
   // the tactics, and the audit trail should show exactly that.
   const decisions: CoachTurnResult['decisions'] = [];
+  // The tokens were spent once, on the one call that produced all of these
+  // proposals, so they are recorded once. Writing them to every row would make
+  // any later sum a multiple of the real spend.
+  let usage = result.usage;
   const logDecision = async (kind: string, proposal: unknown, validation: ValidationResult | null) => {
     if (proposal === undefined || proposal === null) return;
     const row = await prisma.aiDecision.create({
@@ -152,11 +156,16 @@ export async function askCoach(input: {
         model: result.model,
         fallbackUsed: result.fallbackUsed,
         latencyMs: result.latencyMs,
+        inputTokens: usage?.inputTokens,
+        outputTokens: usage?.outputTokens,
+        cacheCreationInputTokens: usage?.cacheCreationInputTokens,
+        cacheReadInputTokens: usage?.cacheReadInputTokens,
         proposal: JSON.parse(JSON.stringify(proposal)),
         validation: JSON.parse(JSON.stringify(validation ?? { ok: true, errors: [], warnings: [] })),
         rationale: result.proposal.rationale.slice(0, 4000),
       },
     });
+    usage = undefined;
     decisions.push({ id: row.id, kind, status: row.status });
   };
 

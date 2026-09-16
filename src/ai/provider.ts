@@ -23,11 +23,30 @@ export interface CoachRequest {
   memories: Array<{ key: string; content: string }>;
 }
 
+/**
+ * What one API call actually cost, as the provider reported it.
+ *
+ * Absent for providers that make no API call — the local coach, and the local
+ * coach standing in after a provider failure — because zero tokens and no
+ * measurement are different things and averaging them together would quietly
+ * understate the real cost per instruction.
+ */
+export interface CoachUsage {
+  inputTokens: number;
+  outputTokens: number;
+  /** Tokens written to the prompt cache, billed at 1.25x input. */
+  cacheCreationInputTokens: number;
+  /** Tokens served from the prompt cache, billed at a tenth of input. */
+  cacheReadInputTokens: number;
+}
+
 export interface CoachResult {
   proposal: CoachProposal;
   provider: string;
   model: string;
   latencyMs: number;
+  /** Measured token usage, when the provider reported any. */
+  usage?: CoachUsage;
   /** True when the primary provider failed and the local coach answered. */
   fallbackUsed: boolean;
   /** Non-fatal problems worth surfacing, such as a retried request. */

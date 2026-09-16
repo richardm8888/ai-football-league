@@ -913,28 +913,38 @@ enum AiDecisionStatus {
 /// Every AI proposal is logged with its validation result and what the human did
 /// with it. Nothing here is applied to game state until a human approves it.
 model AiDecision {
-  id             String           @id @default(cuid())
-  clubId         String
-  matchdayId     String?
-  conversationId String?
-  kind           AiDecisionKind
-  status         AiDecisionStatus @default(PROPOSED)
-  provider       String
-  model          String
-  fallbackUsed   Boolean          @default(false)
-  latencyMs      Int              @default(0)
+  id                       String           @id @default(cuid())
+  clubId                   String
+  matchdayId               String?
+  conversationId           String?
+  kind                     AiDecisionKind
+  status                   AiDecisionStatus @default(PROPOSED)
+  provider                 String
+  model                    String
+  fallbackUsed             Boolean          @default(false)
+  latencyMs                Int              @default(0)
+  /// What the API call that produced this proposal actually cost.
+  ///
+  /// Null when nothing was measured: the local coach makes no API call, and one
+  /// call can propose tactics, training and a scouting summary at once, so the
+  /// counters are recorded on the first of those rows and left null on the rest.
+  /// Summing them therefore gives the real spend rather than a multiple of it.
+  inputTokens              Int?
+  outputTokens             Int?
+  cacheCreationInputTokens Int?
+  cacheReadInputTokens     Int?
   /// Raw structured proposal returned by the provider.
-  proposal       Json
+  proposal                 Json
   /// Domain validation outcome: ok, errors, warnings.
-  validation     Json
-  rationale      String           @default("")
+  validation               Json
+  rationale                String           @default("")
   /// The plan this proposal replaced, so an applied change can be undone.
   /// Null when the proposal was never applied.
-  previousState  Json?
-  appliedAt      DateTime?
-  approvedById   String?
-  approvedAt     DateTime?
-  createdAt      DateTime         @default(now())
+  previousState            Json?
+  appliedAt                DateTime?
+  approvedById             String?
+  approvedAt               DateTime?
+  createdAt                DateTime         @default(now())
 
   club         Club            @relation(fields: [clubId], references: [id], onDelete: Cascade)
   matchday     Matchday?       @relation(fields: [matchdayId], references: [id], onDelete: Cascade)
