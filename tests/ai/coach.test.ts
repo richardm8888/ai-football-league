@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { askCoach, resolveDecision, validateProposal } from '@/ai/coach';
 import { buildCoachContext } from '@/ai/context';
+import { AnthropicCoachProvider } from '@/ai/providers/anthropic';
 import { proposeLocally } from '@/ai/providers/local';
 import { AiProviderError, withRetries, type AiProvider, type CoachRequest } from '@/ai/provider';
 import { clean, dataBlock, sanitiseText } from '@/ai/sanitize';
@@ -378,6 +379,68 @@ describe('provider failure is survivable', () => {
       () => new Promise((resolve) => { setTimeout(resolve, 5000); }),
       { retries: 0, timeoutMs: 120 },
     )).rejects.toThrow(/did not respond/);
+  });
+
+  it('cancels a timed-out attempt rather than leaving it running', async () => {
+    const signals: AbortSignal[] = [];
+    await expect(withRetries(
+      (_attempt, signal) => new Promise((_resolve, rejectAttempt) => {
+        signals.push(signal);
+        const stillRunning = setTimeout(
+          () => rejectAttempt(new Error('the attempt was never cancelled')), 5000);
+        signal.addEventListener('abort', () => {
+          clearTimeout(stillRunning);
+          rejectAttempt(new AiProviderError('The attempt was cancelled.', true));
+        });
+      }),
+      { retries: 1, timeoutMs: 80 },
+    )).rejects.toThrow(/did not respond/);
+
+    // Every abandoned attempt is cancelled, so a retry replaces its predecessor
+    // instead of stacking a second request on top of one still running.
+    expect(signals).toHaveLength(2);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+
+  it('aborts the generation itself when the deadline passes', async () => {
+    const previousTimeout = process.env.AI_TIMEOUT_MS;
+    const previousRetries = process.env.AI_MAX_RETRIES;
+    process.env.AI_TIMEOUT_MS = '80';
+    process.env.AI_MAX_RETRIES = '0';
+
+    try {
+      const provider = new AnthropicCoachProvider('key-that-is-never-used');
+      const requested: Array<AbortSignal | undefined> = [];
+      // Stands in for the network: a generation that outlasts the deadline by a
+      // wide margin, so the only thing that can stop it is the signal.
+      const stub = (_body: unknown, options?: { signal?: AbortSignal }) => (
+        new Promise<never>((_resolve, rejectRequest) => {
+          requested.push(options?.signal);
+          const stillGenerating = setTimeout(
+            () => rejectRequest(new Error('the generation was never cancelled')), 5000);
+          options?.signal?.addEventListener('abort', () => {
+            clearTimeout(stillGenerating);
+            rejectRequest(new Error('aborted'));
+          });
+        })
+      );
+      (provider as unknown as { client: { messages: { create: typeof stub } } })
+        .client.messages.create = stub;
+
+      const context = await buildCoachContext(clubId);
+      await expect(provider.propose({
+        message: 'Press high and get the full backs forward.',
+        history: [], context, memories: [],
+      })).rejects.toThrow(/did not respond/);
+
+      expect(requested).toHaveLength(1);
+      expect(requested[0]?.aborted).toBe(true);
+    } finally {
+      if (previousTimeout === undefined) delete process.env.AI_TIMEOUT_MS;
+      else process.env.AI_TIMEOUT_MS = previousTimeout;
+      if (previousRetries === undefined) delete process.env.AI_MAX_RETRIES;
+      else process.env.AI_MAX_RETRIES = previousRetries;
+    }
   });
 
   it('leaves the manager able to decide manually when the staff fail', async () => {
